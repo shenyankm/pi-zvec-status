@@ -1,42 +1,42 @@
 # pi-zvec-status
 
-**在 Pi 中查看和管理当前项目的 zvec-grep 索引，无需离开会话切换到终端查询。**
+**View and manage your current project's zvec-grep index without leaving Pi.**
 
-`pi-zvec-status` 是一个 Pi 扩展：在底部状态栏持续显示索引是否就绪，并通过 `/zvec` 提供索引状态和管理菜单。
+`pi-zvec-status` is a Pi extension that shows index readiness in the footer and provides an index status and management menu through `/zvec`.
 
-这是独立的第三方扩展，不是 zvec-grep 官方组件。使用已有 MCP 接口，不解析 CLI 展示文本，也不向模型注册额外工具。后台只查询状态，索引管理操作仅在用户通过 `/zvec` 明确确认后执行。
+This is an independent third-party extension, not an official zvec-grep component. It uses existing MCP interfaces, does not parse CLI display output, and does not register additional model-facing tools. Background polling only reads status; index management operations require explicit confirmation in `/zvec`.
 
-## 插件有什么用？
+## What does it do?
 
-使用 zvec-grep 为项目建立语义搜索索引时，你可能需要确认：项目是否已有索引、索引是否需要更新、后台任务是否正在运行，以及当前使用哪个文本嵌入（embedding）模型。本插件把这些信息放到 Pi 界面中，并提供常用管理操作。
+When using zvec-grep for semantic code search, you may want to know whether a project has an index, whether it needs updating, whether a background job is running, and which embedding model it uses. This extension brings that information and common management actions into Pi.
 
-| 功能 | 说明 |
+| Feature | Description |
 | --- | --- |
-| 状态栏提示 | 显示就绪、索引中、无索引、待更新、失败等状态；界面使用英文，中文对照见下文。服务端提供整体进度时显示完成数。 |
-| 项目状态面板 | 查看当前目录、嵌入模型、索引路径，以及已存储、待更新和失败文件数。 |
-| 索引管理 | 在菜单中创建索引、增量更新、重建，或切换本地嵌入模型并重建。 |
-| 模型缓存识别 | 区分已下载（`Downloaded`）、未下载（`Not downloaded`）和缓存未知（`Cache unknown`），已下载的模型优先显示。 |
-| 操作确认 | 索引写操作需要确认；未下载或缓存未知的本地模型还需要单独确认下载。 |
+| Footer status | Shows `ready`, `indexing`, `no index`, `stale`, `failed`, and other states. Displays completed/total counts when the server provides overall progress. |
+| Project status panel | Shows the current directory, embedding model, index path, and stored, pending, and failed file counts. |
+| Index management | Create an index, update it incrementally, rebuild it, or switch to another local embedding model and rebuild. |
+| Model cache detection | Distinguishes `Downloaded`, `Not downloaded`, and `Cache unknown`, with downloaded models listed first. |
+| Operation confirmation | Index writes require confirmation. Missing or unverifiable local models also require separate download consent. |
 
-**它不是搜索引擎本身。** 项目扫描、模型下载、向量计算和索引任务由 zvec-grep 后台服务执行；搜索仍通过 zvec-grep 提供的工具或命令行完成。插件不会自动启动服务、自动建立索引或修改全局默认模型，也不提供删除索引的操作。
+**This is not the search engine itself.** The zvec-grep daemon performs project scanning, model downloads, embedding computation, and index jobs. Search remains available through zvec-grep tools or its CLI. The extension does not automatically start the service, create an index, change the global default model, or offer index deletion.
 
-## 日常使用
+## Everyday use
 
-安装并连接 zvec-grep 服务后：
+After installation and connection to the zvec-grep service:
 
-1. 从需要管理索引的项目目录启动 Pi。
-2. 查看底部状态栏，例如 `● zvec · ready` 或 `○ zvec · no index`。
-3. 输入 `/zvec`，打开面板，依次查看**概览（Overview）**、**工作区（Workspace）**和**操作（Actions）**。
-4. 选择刷新、创建、更新或重建；需要切换模型时选择**切换模型并重建（Switch model and rebuild）**。
-5. 核对确认提示后再提交操作。任务在后台运行，状态栏会定期刷新；也可以在面板中选择**刷新状态（Refresh status）**。
+1. Start Pi from the project directory whose index you want to manage.
+2. Check the footer, for example `● zvec · ready` or `○ zvec · no index`.
+3. Enter `/zvec` to open the **Overview**, **Workspace**, and **Actions** panel.
+4. Select refresh, create, update, or rebuild. Choose **Switch model and rebuild** to change the embedding model.
+5. Review the confirmation prompts before submitting an operation. Jobs run in the background; the footer refreshes periodically. You can also select **Refresh status** in the panel.
 
-界面使用英文，本文档使用中文。查询对象是 Pi 的当前工作目录，不会自动向上寻找项目根目录；具体安装、连接方式和操作限制见下文。
+The interface is in English. The extension uses Pi's current working directory and does not search parent directories for a project root. Installation, connection settings, and limitations are described below.
 
-## 安装
+## Installation
 
-要求 Node.js 22.19+、Pi 1.4.x 或同一 1.x 系列的后续兼容版本（使用 `@earendil-works/pi-coding-agent` 和 `@earendil-works/pi-tui`），以及支持 `zvec_grep_index_status` 的 zvec-grep 本地 HTTP MCP 服务。
+Requires Node.js 22.19+, Pi 1.4.x or a later compatible release in the same 1.x series using `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui`, and a local zvec-grep HTTP MCP service supporting `zvec_grep_index_status`.
 
-本地开发安装：
+Install from a local checkout:
 
 ```bash
 cd /Users/sheny/Developer/code/pi-zvec-status
@@ -44,29 +44,29 @@ npm ci --omit=peer
 pi install /Users/sheny/Developer/code/pi-zvec-status
 ```
 
-在已打开的 Pi 会话中执行 `/reload`，或启动新会话。也可以不安装，仅试用一次：
+Run `/reload` in an existing Pi session, or start a new session. To try the extension without installing it:
 
 ```bash
 pi -e /Users/sheny/Developer/code/pi-zvec-status/index.ts
 ```
 
-上面的绝对路径是本机示例，其他机器请替换为实际目录。
+These absolute paths are examples from the development machine. Replace them with your checkout's location.
 
-### zvec-grep 服务
+### zvec-grep service
 
-插件**不会启动、停止或重新配置服务**。状态工具属于 `full` 工具集；如尚未启动服务，请自行执行：
+The extension **does not start, stop, or reconfigure the service**. The status tool belongs to the `full` toolset. If the service is not running, start it yourself:
 
 ```bash
 zg --server on --mcp-toolset full
 ```
 
-如果已有服务仅开放 `agent` 工具集，需在合适的时候手动停止并以 `full` 重启。重启会影响使用同一个后台服务的其他客户端；扩展不会代为操作。
+If an existing service only exposes the `agent` toolset, stop it at an appropriate time and restart it with `full`. Restarting affects other clients sharing that daemon; the extension never does this for you.
 
-注意：`full` 也会在该服务上开放索引管理工具，不只是状态查询。插件后台只调用状态工具；用户确认索引操作后才调用索引管理工具，其他已连接客户端也可能访问这些工具。插件不依赖 Pi 自身的 MCP 配置，也不会修改它。
+The `full` toolset exposes index management tools as well as status queries. The extension only calls the status tool in the background and calls the index management tool after user confirmation. Other connected clients may also access those tools. The extension does not depend on or modify Pi's own MCP configuration.
 
-## 使用
+## Status and behavior
 
-状态示例：
+Example footer states:
 
 ```text
 ● zvec · ready
@@ -76,72 +76,80 @@ zg --server on --mcp-toolset full
 ! zvec · unavailable
 ```
 
-图标与状态使用 Pi 当前主题的语义色：就绪为绿色、查询和索引中为强调色、警告为警告色、失败为错误色；名称使用柔和颜色，所有状态均在名称后显示英文说明；就绪时显示 `ready`，不显示文件数。弹窗中仍保留完整状态文字。运行中的创建、更新和重建任务按服务端状态统一显示 `indexing`，有整体进度时附带完成数。
+Icons and state descriptions use semantic colors from Pi's active theme: green for ready, accent for checking and indexing, warning for warnings, and error for failures. The name uses a muted color. Every state includes an English description after the name; ready is shown as `ready` without file counts. The panel retains the full status text.
 
-### 状态含义
+The server reports running create, update, and rebuild jobs as `indexing`. Overall completed/total counts are shown when available.
 
-| 界面显示 | 中文含义 |
+### State reference
+
+| State | Meaning |
 | --- | --- |
-| `ready` | 索引已就绪。 |
-| `checking` | 正在查询索引状态。 |
-| `queued` | 索引任务已排队。 |
-| `indexing` | 正在创建、更新或重建索引；可能附带整体进度。 |
-| `no index` | 当前工作目录尚未建立索引。 |
-| `stale` | 索引待更新，可能有文件变更尚未处理。 |
-| `rebuild required` | 索引需要重建。 |
-| `failed` | 索引任务或部分文件处理失败。 |
-| `cancelled` | 索引任务已取消。 |
-| `disabled` | 索引功能已禁用。 |
-| `unavailable` | 无法连接服务或读取索引状态。 |
-| `unknown` | 响应格式或状态无法识别，不判定为已就绪。 |
+| `ready` | The index is ready. |
+| `checking` | Querying index status. |
+| `queued` | An index job is queued. |
+| `indexing` | Creating, updating, or rebuilding the index; may include overall progress. |
+| `no index` | No index exists for the current working directory. |
+| `stale` | The index needs updating; file changes may not have been processed yet. |
+| `rebuild required` | The index must be rebuilt. |
+| `failed` | An index job or some files failed processing. |
+| `cancelled` | The index job was cancelled. |
+| `disabled` | Indexing is disabled. |
+| `unavailable` | The service cannot be reached or its status cannot be read. |
+| `unknown` | The response format or state is not recognized; it is not treated as ready. |
 
-### 刷新与交互行为
+### Refresh and interaction
 
-- 交互式会话启动时查询一次，之后每次查询完成 **30 秒**后再次查询。
-- `/zvec`：打开当前项目索引状态和操作菜单；原 `/zvec-status` 已合并移除。
-- 弹窗按概览（Overview）、工作区（Workspace）、操作（Actions）分区；状态使用语义色，路径等次要信息弱化，字段标签对齐，窄终端中自动换行。显示项目目录、索引状态、嵌入模型、已存储/待更新/失败文件数和索引路径。
-- 支持刷新状态、创建索引、增量更新、重建，以及切换本地嵌入模型并重建。
-- 每项写操作都需要确认；有排队或运行中的任务，或状态格式无法识别时，仅提供刷新和关闭。提交前再次检查状态，避免使用过期的确认。无法确定当前模型时不会提交任务。
-- 索引操作在后台服务后台运行；退出菜单或 Pi 不会撤销已提交的任务。
-- 仅当最终显示内容变化时更新底部状态栏，避免重复刷新。
-- 请求总期限为 **10 秒**；同时发生的刷新合并为同一个请求。
-- 退出、切换会话或 `/reload` 时停止定时器并取消请求。
-- 打印模式（print）、JSON 输出模式、远程调用模式（RPC）等非交互终端模式不启动后台查询。
-- 使用 `ctx.ui.setStatus()`，不替换 Pi 默认底部状态栏。第三方自定义底部状态栏需要自行显示扩展状态。
+- Queries once when an interactive session starts, then **30 seconds after each query completes**.
+- `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
+- The panel separates **Overview**, **Workspace**, and **Actions**, uses semantic status colors, dims secondary paths, aligns field labels, and wraps content in narrow terminals.
+- Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
+- Every write operation requires confirmation. Queued/running jobs or unrecognized status formats limit the menu to refresh and close. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
+- Index jobs run in the daemon. Closing the menu or Pi does not cancel an already accepted job.
+- Updates the footer only when its final displayed content changes.
+- Each request has a **10-second deadline**. Concurrent monitor refreshes share the same request.
+- Stops polling and cancels requests when exiting, switching sessions, or reloading.
+- Does not start background queries in print, JSON, RPC, or other non-TUI modes.
+- Uses `ctx.ui.setStatus()` without replacing Pi's default footer. Third-party custom footers must display extension status themselves.
 
-查询根目录为 Pi 提供的 `ctx.cwd`，不会自行向上查找 Git 仓库或索引目录。从子目录启动 Pi 时，显示的是该目录对应的状态。
+The query root is exactly Pi's `ctx.cwd`. The extension does not search parent directories for a Git repository or index. Starting Pi from a subdirectory queries that subdirectory's status.
 
-### 连接与认证
+### Connection and authentication
 
-复用 zvec-grep 已有环境变量，无需配置文件：
+Reuses zvec-grep environment variables; no extension configuration file is needed:
 
-| 环境变量 | 默认值 / 含义 |
+| Variable | Default / meaning |
 | --- | --- |
 | `ZVEC_GREP_SERVER_URL` | `http://127.0.0.1:7999/mcp` |
-| `ZVEC_GREP_SERVER_TOKEN` | 可选 Bearer 令牌，优先于令牌文件 |
-| `ZVEC_GREP_SERVER_TOKEN_FILE` | 可选令牌文件路径，读取后去除首尾空白 |
+| `ZVEC_GREP_SERVER_TOKEN` | Optional Bearer token; takes precedence over the token file. |
+| `ZVEC_GREP_SERVER_TOKEN_FILE` | Optional token file path; leading and trailing whitespace is trimmed. |
 
-这些变量必须由 **Pi 进程**继承；仅在 Pi 的 MCP 配置中设置环境变量不会传给此扩展。
+These variables must be inherited by the **Pi process**. Variables set only in Pi's MCP configuration are not passed to this extension.
 
-仅接受 HTTP(S) 回环地址：`127.0.0.1`、`localhost`、`[::1]`。不接受包含用户名、密码、查询参数或片段标识的 URL，避免向远端发送工作目录或在 URL 中泄露认证信息。
+Only HTTP(S) loopback addresses are accepted: `127.0.0.1`, `localhost`, and `[::1]`. URLs containing a username, password, query, or fragment are rejected to avoid sending the working directory to a remote host or exposing credentials in URLs.
 
-每次轮询建立一个短期 MCP 会话，完成后终止并关闭连接。断连、认证失败或接口不兼容时显示不可用（`unavailable`），下次轮询重试，不反复弹窗，不展示服务端原始错误或凭据。
+Each poll creates a short-lived MCP session, then terminates and closes it. Connection errors, authentication failures, and incompatible interfaces display `unavailable`. The next poll retries without repeated popups or exposing raw server errors or credentials.
 
-## 操作边界与限制
+## Safety boundaries and limitations
 
-后台轮询仅调用 `zvec_grep_index_status({ root })`。用户确认后，菜单通过 `zvec_grep_index({ root, wait: false, ... })` 提交创建、增量更新或重建任务。不提供删除索引、切换其他项目、修改全局模型配置或授予远程嵌入权限的操作。
+Background polling only calls `zvec_grep_index_status({ root })`. After confirmation, the menu submits create, incremental update, or rebuild jobs through `zvec_grep_index({ root, wait: false, ... })`. It does not offer index deletion, switching to other projects, changing global model settings, or granting remote embedding authorization.
 
-“切换索引”在此指切换当前项目的嵌入模型并重建，而不是更改 Pi 工作目录。模型选择仅列出 zvec-grep 0.2.2 支持的本地模型。列表标记 `Downloaded` / `Not downloaded`，已下载项优先显示；配置或缓存无法读取时标记 `Cache unknown`，不误判为未下载。所有可能使用本地模型的写操作（创建、切换、沿用模型更新和重建）都统一检查下载授权。模型为 `Not downloaded` 或 `Cache unknown` 时，必须先通过独立的“是否下载模型”（`Download model?`）授权确认，再确认索引操作；取消任一步均不会提交任务。已下载的模型跳过下载授权，但仍需确认索引操作；若确认期间缓存被清理，提交前检查会阻止本次操作，重新选择操作后再确认下载。每次打开列表仅检查本地完成标记和预期文件大小，不加载模型、不联网、不下载，也不对大型权重重新计算哈希。支持 Hugging Face 和 ModelScope 缓存。
+Switching the index means switching the current project's embedding model and rebuilding, not changing Pi's working directory. Model selection lists local models supported by zvec-grep 0.2.2. Downloaded models appear first. Unreadable configuration or cache data is labeled `Cache unknown`, not incorrectly treated as missing.
 
-缓存目录按 zvec-grep 的顺序解析：`~/.zvec-grep/config.json` 中的 `defaults.modelCacheDir`、`ZVEC_GREP_MODEL_CACHE`、`$ZVEC_GREP_HOME/models` 或默认 `~/.zvec-grep/models`。Pi 与后台服务必须使用相同缓存设置；后台服务独立的 `--model-cache` 参数无法通过现有状态接口获知。缓存检测适配 0.2.2 的模型目录与快照，后续版本更换目录或模型版本时需要同步更新。未缓存的模型首次使用可能下载。已有远程模型可以沿用更新或重建，但必须已有用户授权，插件不会代为授权。切换模型和重建期间，搜索可能暂不可用。
+All writes that may use a local model share the same download-consent check: creation, model switching, incremental updates, and rebuilding with the existing model. A `Not downloaded` or `Cache unknown` model requires a separate **Download model?** confirmation before confirming the index operation. Cancelling either step prevents submission. Downloaded models skip download consent but still require operation confirmation. If the cache disappears during confirmation, the pre-submission check blocks that operation; select the action again to review download consent.
 
-提交超时不代表任务未被接受，请先刷新状态再重试。多个客户端间的提交竞争最终由后台服务处理。
+Opening the model list only checks local completion markers and expected file sizes. It does not load models, connect to a model provider, download files, or rehash large model weights. Both Hugging Face and ModelScope caches are supported.
 
-后台状态查询也不代表服务端完全无副作用：状态接口可能扫描本地文件、激活工作区运行时或文件变更监听器。大工作区、多 Pi 会话的轮询开销取决于 zvec-grep 实现。
+Cache directories are resolved in zvec-grep's order: `defaults.modelCacheDir` in `~/.zvec-grep/config.json`, then `ZVEC_GREP_MODEL_CACHE`, then `$ZVEC_GREP_HOME/models`, or the default `~/.zvec-grep/models`. Pi and the daemon must use the same cache settings. A daemon-only `--model-cache` argument cannot be discovered through the current status interface. Cache detection matches the 0.2.2 model snapshots and directory layout; it must be updated if later versions change them.
 
-状态来自服务端已有快照，不额外扫描或校验文件。进度仅在服务端提供 completion 时展示；不会把单阶段计数冒充整体百分比。未知或不兼容响应不会显示为已就绪。
+An uncached model may download on first use. Existing remote models can be reused for updates or rebuilds only with existing user authorization; the extension does not grant authorization. Search may be temporarily unavailable during model switching or rebuilding.
 
-## 开发与验证
+A submission timeout does not mean the daemon rejected the job. Refresh status before retrying. The daemon ultimately handles submission races between clients.
+
+Even background status queries are not necessarily side-effect-free on the server: they may scan local files or activate a workspace runtime or file watcher. Polling costs for large workspaces or multiple Pi sessions depend on zvec-grep's implementation.
+
+Status comes from the server's existing snapshot; the extension does not perform an additional workspace scan or validation. Progress is only displayed when the server provides overall completion, never by treating a single phase's count as overall progress. Unknown or incompatible responses are not shown as ready.
+
+## Development and verification
 
 ```bash
 npm ci --omit=peer
@@ -150,20 +158,22 @@ npm run coverage
 npm pack --dry-run
 ```
 
-源码和测试均使用 TypeScript，开启严格类型检查（strict）。Pi 直接加载 `index.ts`，无需构建；测试使用 Node 内置 TypeScript 类型擦除和测试运行器。`npm run check` 先检查类型再运行测试。
+Source and tests use TypeScript with strict type checking. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs type checking before the tests.
 
-运行时使用 MCP 官方 SDK，并在首次查询时才加载，非交互终端模式不加载 SDK。自定义菜单仅在打开时加载，并使用 Pi 宿主提供的 pi-tui 原生组件，不引入额外界面框架。TypeScript、Node 类型和用于开发类型检查的 Pi、pi-tui 均为开发依赖（`devDependencies`）；Pi 和 pi-tui 同时声明为宿主对等依赖（`peerDependencies`），不随插件打包。测试覆盖状态映射、真实 HTTP MCP 协议交互、认证、只读调用、连接清理、刷新合并、底部状态栏去重与主题切换、命令菜单、确认和取消、索引提交参数、错误恢复及非交互模式。
+The official MCP SDK is loaded on the first query, not in non-TUI modes. The custom menu loads only when opened and uses Pi's native pi-tui components without another UI framework. TypeScript, Node types, and the Pi/pi-tui packages used for development are `devDependencies`. Pi and pi-tui are also declared as host `peerDependencies` and are not bundled.
 
-测试使用临时缓存和本地模拟 MCP 服务，不依赖用户已下载的模型。覆盖下载拒绝/取消、缓存变化、异常状态不误报为就绪、会话切换与重载、并发菜单、401/403、重定向拒绝、令牌文件失败、提交结果校验及服务端接受后响应超时且不自动重试。
+Tests cover state mapping, real HTTP MCP protocol exchanges with local mock servers, authentication, read-only calls, connection cleanup, refresh coalescing, footer deduplication and theme changes, menus, confirmations and cancellations, submission arguments, error recovery, and non-interactive modes.
 
-`npm run check` 包含真实 Pi 加载器的包发现/TypeScript 加载冒烟测试。`npm run coverage` 仅统计插件源码，并通过测试名过滤暂不执行加载器冒烟用例，避免 jiti 转译副本干扰原始源码行号；完整冒烟测试仍由 `check` 运行。
+Tests use temporary caches and do not depend on models downloaded by the user. Regression cases include denied downloads, cache changes, malformed states never reporting ready, session switching/reloading, duplicate menus, HTTP 401/403, redirect rejection, token-file failures, submission-result validation, and accepted submissions whose responses time out without automatic retries.
 
-自动化检查使用 GitHub Actions，覆盖 Linux、macOS、Windows，Node 22.19 与 24，以及锁定的 Pi 1.4.0 和最新兼容 1.x 宿主。工作流需要推送到 GitHub 后才能执行；持续集成（CI）不下载模型，也不操作真实索引。实际后台服务与终端界面的隔离验收步骤见 [手工验收清单](docs/verification.md)。发布前仍需项目所有者确定许可证。
+`npm run check` includes a real Pi loader smoke test for package discovery and TypeScript loading. `npm run coverage` counts only extension source and filters out that smoke test by name to prevent jiti-transpiled copies from distorting original source line coverage. The full smoke test still runs in `check`.
 
-卸载：
+GitHub Actions covers Linux, macOS, Windows, Node 22.19 and 24, and the locked Pi 1.4.0 host plus the latest compatible 1.x host. The workflow runs after pushing to GitHub. CI does not download models or operate on real indexes. For isolated live-daemon and terminal checks, see the [manual verification checklist](docs/verification.md). The project owner still needs to choose a license before release.
+
+## Uninstall
 
 ```bash
 pi remove /Users/sheny/Developer/code/pi-zvec-status
 ```
 
-之后执行 `/reload`。卸载不会停止共享 zvec-grep 后台服务，也不会删除索引。
+Then run `/reload`. Uninstalling does not stop a shared zvec-grep daemon or delete any index.
