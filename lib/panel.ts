@@ -1,0 +1,80 @@
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { indexWorkspace, readSnapshot } from "./status.ts";
+import { confirmModelDownload, localModelChoices } from "./models.ts";
+
+export async function openPanel(ctx: ExtensionContext, signal: AbortSignal) {
+  const deadline = () => AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+  try {
+    while (!signal.aborted) {
+      const snapshot = await readSnapshot(ctx.cwd, deadline());
+      const options = snapshot.busy || snapshot.text === "zvec: unknown"
+        ? ["Refresh status", "Close"]
+        : snapshot.indexed
+          ? ["Refresh status", "Update index (incremental)", "Switch model and rebuild", "Rebuild index", "Close"]
+          : ["Refresh status", "Create index", "Close"];
+      const { showIndexMenu } = await import("./menu.ts");
+      const action = await showIndexMenu(ctx, snapshot, options, signal);
+      if (!action || action === "Close" || signal.aborted) return;
+      if (action === "Refresh status") continue;
+      let embedding: string | undefined;
+      let choices: Awaited<ReturnType<typeof localModelChoices>> | undefined;
+      if (action === "Create index" || action === "Switch model and rebuild") {
+        choices = await localModelChoices();
+        if (signal.aborted) return;
+        const selected = await ctx.ui.select(
+          "Local embedding models (uncached models download on use)",
+          choices.map((choice) => choice.label),
+          { signal },
+        );
+        const choice = choices.find((choice) => choice.label === selected);
+        if (!choice || signal.aborted) continue;
+        embedding = choice.model;
+      }
+      const rebuild = action === "Rebuild index" || action === "Switch model and rebuild";
+      const model = embedding ?? snapshot.model;
+      if (!model) {
+        ctx.ui.notify("Cannot determine the embedding model. Refresh status before retrying.", "warning");
+        continue;
+      }
+      let downloadAllowed = false;
+      if (model.startsWith("local/")) {
+        choices ??= await localModelChoices();
+        const choice = choices.find((choice) => choice.model === model) ?? { model, status: "Cache unknown" as const };
+        if (!await confirmModelDownload(ctx.ui, choice, signal)) continue;
+        downloadAllowed = choice.status !== "Downloaded";
+      }
+      const confirmed = await ctx.ui.confirm(action, [
+        snapshot.details,
+        `Model: ${model}`,
+        rebuild ? "Rebuild this project's index. Search may be unavailable during rebuilding. Project source files will not be modified." : "Scan this project and create or update its index in the background.",
+        !model.startsWith("local/") ? "Warning: remote models send project content to the provider. Existing remote embedding authorization is required; this plugin will not grant it." : "Local models may use significant memory and compute resources.",
+      ].join("\n"), { signal });
+      if (!confirmed || signal.aborted) continue;
+      // Another client may have started a job while the confirmation was open.
+      const latest = await readSnapshot(ctx.cwd, deadline());
+      if (latest.busy || latest.text === "zvec: unknown" || latest.model !== snapshot.model || latest.indexed !== snapshot.indexed) {
+        ctx.ui.notify("Index state has changed. Refresh and select the operation again.", "warning");
+        continue;
+      }
+      if (model.startsWith("local/") && !downloadAllowed) {
+        const choice = (await localModelChoices()).find((choice) => choice.model === model);
+        if (choice?.status !== "Downloaded") {
+          ctx.ui.notify("Model cache has changed. Select the operation again to review download consent.", "warning");
+          continue;
+        }
+      }
+      signal.throwIfAborted();
+      const state = await indexWorkspace(ctx.cwd, {
+        ...(rebuild ? { rebuild: true } : {}),
+        ...(embedding ? { embedding } : {}),
+      }, deadline());
+      if (!signal.aborted) ctx.ui.notify(`Index request submitted: ${state}. Use /zvec to check the latest status.`, "info");
+      return;
+    }
+  } catch {
+    if (!signal.aborted) ctx.ui.notify(
+      "Cannot read status or submit the index operation. Check the daemon, MCP URL/token, and --mcp-toolset full. If you just submitted an operation, refresh status before retrying to avoid duplicate submissions.",
+      "warning",
+    );
+  }
+}

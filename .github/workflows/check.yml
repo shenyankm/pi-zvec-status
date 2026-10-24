@@ -1,0 +1,35 @@
+name: Check
+
+on: [push, pull_request, workflow_dispatch]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+        node: ["22.19.0", "24"]
+        host: [locked]
+        include:
+          - os: ubuntu-latest
+            node: "24"
+            host: latest-compatible
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --omit=peer
+      - name: Check latest compatible Pi host
+        if: matrix.host == 'latest-compatible'
+        run: npm install --no-save --package-lock=false --omit=peer "@earendil-works/pi-coding-agent@^1.4.0" "@earendil-works/pi-tui@^1.4.0"
+      - run: npm run check
+      - run: npm pack --dry-run
+      - name: Source coverage
+        if: matrix.os == 'ubuntu-latest' && matrix.node == '24' && matrix.host == 'locked'
+        run: npm run coverage

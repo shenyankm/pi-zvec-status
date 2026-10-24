@@ -1,0 +1,43 @@
+{
+  "name": "pi-zvec-status",
+  "version": "0.1.0",
+  "description": "zvec-grep index status and workspace management for Pi.",
+  "type": "module",
+  "keywords": [
+    "pi-package",
+    "zvec-grep",
+    "pi-extension"
+  ],
+  "files": [
+    "index.ts",
+    "lib/",
+    "docs/",
+    "README.md"
+  ],
+  "pi": {
+    "extensions": [
+      "./index.ts"
+    ]
+  },
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "scripts": {
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "check": "tsc --noEmit && npm test",
+    "coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-exclude=test/** --test-skip-pattern=\"^Pi loader smoke:\" test/*.test.ts"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-tui": "^1.4.0"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.2"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "^1.4.0",
+    "@earendil-works/pi-tui": "^1.4.0",
+    "@types/node": "^22.20.5",
+    "typescript": "^7.0.2"
+  }
+}
