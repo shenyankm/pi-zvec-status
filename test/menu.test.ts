@@ -43,16 +43,41 @@ test("menu preserves selection, keyboard navigation, and escape cancellation", (
   assert.deepEqual(selected, ["Rebuild index", undefined]);
 });
 
+test("menu reuses static layout while keeping selection live and rebuilding on resize", () => {
+  let colors = 0;
+  const counted = { ...theme, fg: (_color: string, text: string) => { colors++; return text; } } as Theme;
+  const menu = createIndexMenu(snapshot, options, counted, () => {});
+  const first = menu.render(100);
+  colors = 0;
+  assert.deepEqual(menu.render(100), first);
+  const redrawColors = colors;
+  menu.handleInput("\x1b[B");
+  colors = 0;
+  const selected = menu.render(100);
+  assert.notDeepEqual(selected, first);
+  assert.equal(colors, redrawColors, "navigation must not recolor static layout");
+
+  for (const width of [100, 40, 40, 0, 1, 120, 100]) {
+    const fresh = createIndexMenu(snapshot, options, theme, () => {});
+    fresh.handleInput("\x1b[B");
+    const expected = fresh.render(width);
+    assert.deepEqual(menu.render(width), expected);
+    assert.deepEqual(menu.render(width), expected);
+  }
+});
+
 test("menu recomputes theme colors after invalidation", () => {
   const calls: [string, string][] = [];
-  const colored = { ...theme, fg: (color: string, text: string) => { calls.push([color, text]); return text; } } as Theme;
+  let prefix = "";
+  const colored = { ...theme, fg: (color: string, text: string) => { calls.push([color, text]); return prefix + text; } } as Theme;
   const menu = createIndexMenu(snapshot, options, colored, () => {});
-  menu.render(100);
+  const before = menu.render(100);
   assert.ok(calls.some(([color, text]) => color === "success" && text.includes("ready")));
   assert.ok(calls.some(([color, text]) => color === "dim" && text.includes("/workspace/")));
   calls.length = 0;
+  prefix = "new-theme:";
   menu.invalidate();
-  menu.render(100);
+  assert.notDeepEqual(menu.render(100), before);
   assert.ok(calls.some(([color, text]) => color === "success" && text.includes("ready")));
 });
 

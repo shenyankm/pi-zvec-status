@@ -164,8 +164,11 @@ Status comes from the server's existing snapshot; the extension does not perform
 npm ci --omit=peer
 npm run check
 npm run coverage
+npm run benchmark
 npm pack --dry-run
 ```
+
+For the reproducible menu-rendering benchmark, before/after measurements, and acceptance results, see [performance verification](docs/performance.md).
 
 Source and tests use TypeScript with strict type checking. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs type checking before the tests.
 
