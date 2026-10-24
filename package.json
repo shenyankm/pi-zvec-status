@@ -35,10 +35,13 @@
   },
   "scripts": {
     "test": "node --experimental-strip-types --test test/*.test.ts",
-    "check": "tsc --noEmit && npm test",
+    "check": "npm run lint && npm run format:check && npm test",
+    "lint": "tsc --noEmit",
+    "format": "prettier --write index.ts lib test \"*.json\" .github",
+    "format:check": "prettier --check index.ts lib test \"*.json\" .github",
     "benchmark": "node --experimental-strip-types test/benchmark.ts",
     "test:environments": "node --experimental-strip-types --test test/git.test.ts test/live-status.test.ts test/protocol.test.ts && python3 test/environments/terminal-check.py",
-    "coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-exclude=test/** --test-skip-pattern=\"^Pi loader smoke:\" test/*.test.ts"
+    "coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-exclude=test/** --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=85 --test-skip-pattern=\"^Pi loader smoke:\" test/*.test.ts"
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
@@ -47,10 +50,14 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2"
   },
+  "overrides": {
+    "undici@8.10.2": "8.12.2"
+  },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "^1.4.0",
     "@earendil-works/pi-tui": "^1.4.0",
     "@types/node": "^22.20.5",
+    "prettier": "^3.9.5",
     "typescript": "^7.0.2"
   }
 }

@@ -32,7 +32,7 @@ export default function (pi: ExtensionAPI) {
   pi.on("session_start", async (_event, ctx) => {
     await stop();
     if (ctx.mode !== "tui") return;
-    const currentSession = session = new AbortController();
+    const currentSession = (session = new AbortController());
     let displayed: string | undefined;
     let latest: Snapshot | undefined;
     let view: Snapshot | undefined;
@@ -40,10 +40,16 @@ export default function (pi: ExtensionAPI) {
     const render = (text: string) => {
       const base = latest ?? view;
       if (base) {
-        view = { ...base, text, details: base.details.split("\n")
-          .filter((line) => !line.startsWith("Checked: "))
-          .map((line) => line.startsWith("Status: ") ? `Status: ${text.replace(/^zvec: /, "")}` : line)
-          .concat(`Checked: ${new Date(base.checkedAt).toISOString()}`).join("\n") };
+        view = {
+          ...base,
+          text,
+          details: base.details
+            .split("\n")
+            .filter((line) => !line.startsWith("Checked: "))
+            .map((line) => (line.startsWith("Status: ") ? `Status: ${text.replace(/^zvec: /, "")}` : line))
+            .concat(`Checked: ${new Date(base.checkedAt).toISOString()}`)
+            .join("\n"),
+        };
         for (const listener of listeners) listener(view);
       }
       const formatted = formatStatus(text, ctx.ui.theme, text === "zvec: unavailable" ? undefined : view?.git);
@@ -52,7 +58,7 @@ export default function (pi: ExtensionAPI) {
       displayed = formatted;
     };
     render("zvec: checking");
-    const current = monitor = createMonitor({
+    const current = (monitor = createMonitor({
       read: async (signal) => {
         latest = undefined;
         const snapshot = await readSnapshot(ctx.cwd, signal);
@@ -61,7 +67,7 @@ export default function (pi: ExtensionAPI) {
         return snapshot.text;
       },
       render,
-    });
+    }));
     source = {
       read: async () => {
         const result = await current.refresh();
@@ -69,7 +75,12 @@ export default function (pi: ExtensionAPI) {
         if (!result?.text || !view) throw new Error("Status is unavailable.");
         return view;
       },
-      subscribe: (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
+      subscribe: (listener) => {
+        listeners.add(listener);
+        return () => {
+          listeners.delete(listener);
+        };
+      },
     };
     unsubscribeInput = ctx.ui.onTerminalInput?.((data) => {
       if (data === "\x1b[I") void current.refresh();
@@ -83,7 +94,9 @@ export default function (pi: ExtensionAPI) {
       if (text.includes("\x1b[I")) void current.refresh();
     };
     if (process.stdin.isTTY) process.stdin.on("data", onFocus);
-    onContinue = () => { void current.refresh(); };
+    onContinue = () => {
+      void current.refresh();
+    };
     process.on("SIGCONT", onContinue);
     void current.refresh();
   });
@@ -101,7 +114,8 @@ export default function (pi: ExtensionAPI) {
         return;
       }
       if (args.trim() && args.trim() !== "worktrees") {
-        ctx.ui.notify("Use /zvec or /zvec worktrees.", "info"); return;
+        ctx.ui.notify("Use /zvec or /zvec worktrees.", "info");
+        return;
       }
       if (panelSession === session) return;
       const currentSession = session;

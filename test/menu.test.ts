@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { visibleWidth } from "@earendil-works/pi-tui";
-import { createIndexMenu, showIndexMenu } from "../lib/menu.ts";
+import { createIndexMenu, showIndexMenu, indexActions } from "../lib/menu.ts";
 
 const snapshot = {
   text: "zvec: ready · 11 files",
@@ -51,7 +51,13 @@ test("menu preserves selection, keyboard navigation, and escape cancellation", (
 
 test("menu reuses static layout while keeping selection live and rebuilding on resize", () => {
   let colors = 0;
-  const counted = { ...theme, fg: (_color: string, text: string) => { colors++; return text; } } as Theme;
+  const counted = {
+    ...theme,
+    fg: (_color: string, text: string) => {
+      colors++;
+      return text;
+    },
+  } as Theme;
   const menu = createIndexMenu(snapshot, options, counted, () => {});
   const first = menu.render(100);
   colors = 0;
@@ -75,7 +81,13 @@ test("menu reuses static layout while keeping selection live and rebuilding on r
 test("menu recomputes theme colors after invalidation", () => {
   const calls: [string, string][] = [];
   let prefix = "";
-  const colored = { ...theme, fg: (color: string, text: string) => { calls.push([color, text]); return prefix + text; } } as Theme;
+  const colored = {
+    ...theme,
+    fg: (color: string, text: string) => {
+      calls.push([color, text]);
+      return prefix + text;
+    },
+  } as Theme;
   const menu = createIndexMenu(snapshot, options, colored, () => {});
   const before = menu.render(100);
   assert.ok(calls.some(([color, text]) => color === "success" && text.includes("ready")));
@@ -87,16 +99,83 @@ test("menu recomputes theme colors after invalidation", () => {
   assert.ok(calls.some(([color, text]) => color === "success" && text.includes("ready")));
 });
 
+test("24-row terminals retain every selected action while long details scroll separately", () => {
+  const full = { ...snapshot, indexed: true, details: snapshot.details + "\nChecked: 2026-10-25T00:00:00.000Z" };
+  const actions = indexActions(full);
+  for (const width of [40, 80]) {
+    let selected: string | undefined;
+    const menu = createIndexMenu(
+      full,
+      actions,
+      theme,
+      (value) => {
+        selected = value;
+      },
+      () => 16,
+    );
+    for (let index = 0; index < actions.length; index++) {
+      const lines = menu.render(width);
+      assert.ok(lines.length <= 16);
+      assert.ok(lines.every((line) => visibleWidth(line) <= width));
+      assert.ok(
+        lines.some((line) => line.includes(`→ ${actions[index]}`)),
+        `hidden selection: ${actions[index]}`,
+      );
+      if (index < actions.length - 1) menu.handleInput("\x1b[B");
+    }
+    menu.handleInput("\r");
+    assert.equal(selected, "Close");
+    for (let page = 0; page < 50; page++) menu.handleInput("\x1b[C");
+    const bottom = menu.render(width).join("\n");
+    assert.match(bottom, /Checked:/);
+    assert.ok(bottom.includes("→ Close"));
+    menu.handleInput("\x1b[D");
+    assert.notEqual(menu.render(width).join("\n"), bottom);
+  }
+});
+
+test("height changes and temporary read-only frames preserve the selected action", () => {
+  const full = { ...snapshot, indexed: true };
+  const actions = indexActions(full);
+  let height = 16;
+  const menu = createIndexMenu(
+    full,
+    actions,
+    theme,
+    () => {},
+    () => height,
+  );
+  for (let step = 0; step < 4; step++) menu.handleInput("\x1b[B");
+  for (const rows of [16, 6, 1, 16]) {
+    height = rows;
+    const lines = menu.render(40);
+    assert.ok(lines.length <= rows);
+    assert.ok(lines.some((line) => line.includes("→ Rebuild index")));
+  }
+  const busy = { ...full, busy: true, text: "zvec: indexing" };
+  menu.update(busy, indexActions(busy));
+  assert.doesNotMatch(menu.render(40).join("\n"), /Rebuild index/);
+  menu.update(full, actions);
+  assert.match(menu.render(40).join("\n"), /→ Rebuild index/);
+});
+
 test("session abort closes a custom menu and pre-aborted sessions do not open it", async () => {
   const controller = new AbortController();
   let opened = 0;
-  const ctx = { ui: {
-    custom: (factory: Parameters<ExtensionContext["ui"]["custom"]>[0]) => new Promise((resolve) => {
-      opened++;
-      void factory({} as Parameters<typeof factory>[0], theme, {} as Parameters<typeof factory>[2], resolve);
-      controller.abort();
-    }),
-  } } as unknown as ExtensionContext;
+  const ctx = {
+    ui: {
+      custom: (
+        factory: Parameters<ExtensionContext["ui"]["custom"]>[0],
+        options: Parameters<ExtensionContext["ui"]["custom"]>[1],
+      ) =>
+        new Promise((resolve) => {
+          opened++;
+          assert.equal(options?.overlay, true);
+          void factory({} as Parameters<typeof factory>[0], theme, {} as Parameters<typeof factory>[2], resolve);
+          controller.abort();
+        }),
+    },
+  } as unknown as ExtensionContext;
   assert.equal(await showIndexMenu(ctx, snapshot, options, controller.signal), undefined);
   await showIndexMenu(ctx, snapshot, options, controller.signal);
   assert.equal(opened, 1);

@@ -38,6 +38,8 @@ def run(mode, theme, suspend):
             "models": [{"id": "fixture"}]
         }}}))
         (agent / "settings.json").write_text(json.dumps({"theme": theme, "quietStartup": True}))
+        widget = base / "widget.ts"
+        widget.write_text('export default pi => pi.on("session_start", (_event, ctx) => { if (ctx.mode === "tui") ctx.ui.setWidget("height-fixture", Array.from({length: 8}, (_, i) => `Host widget ${i}`)); });\n')
         env = dict(os.environ, HOME=str(base), USERPROFILE=str(base), PI_CODING_AGENT_DIR=str(agent),
                    ZVEC_GREP_HOME=str(base / "zvec-home"), TERM="xterm-256color", PI_OFFLINE="1")
         env.pop("ZVEC_GREP_SERVER_TOKEN_FILE", None)
@@ -71,8 +73,8 @@ def run(mode, theme, suspend):
             endpoint = daemon_message(lambda value: value.get("ready"))
             env.update(ZVEC_GREP_SERVER_URL=endpoint["url"], ZVEC_GREP_SERVER_TOKEN=endpoint["token"])
             master, slave = pty.openpty()
-            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 44, 110, 0, 0))
-            proc = subprocess.Popen([shutil.which("pi"), "--offline", "--no-extensions", "-e", str(ROOT / "index.ts"),
+            fcntl.ioctl(slave, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
+            proc = subprocess.Popen([shutil.which("pi"), "--offline", "--no-extensions", "-e", str(ROOT / "index.ts"), "-e", str(widget),
                                      "--no-mcp", "--no-skills", "--no-prompt-templates", "--no-context-files",
                                      "--no-session", "--provider", "fixture", "--model", "fixture", "--tui-mode", mode],
                                     cwd=work, env=env, stdin=slave, stdout=slave, stderr=slave, start_new_session=True)
@@ -119,12 +121,26 @@ def run(mode, theme, suspend):
                 return at
 
             wait("ready (last check)")
-            wait("Index Manager", send("/zvec\r"))
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 44, 40, 0, 0))
+            at = send("/zvec\r")
+            wait("Index Manager", at)
+            wait("Update index", at)
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 40, 0, 0))
             proc.send_signal(signal.SIGWINCH)
             settle()
             assert proc.poll() is None
-            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 44, 110, 0, 0))
+            at = send("\x1b[B")
+            settle(0.1)
+            send("\x1b[B")
+            wait("Update index", at)
+            at = len(transcript)
+            for _ in range(10):
+                send("\x1b[C")
+                settle(0.06)
+            wait("Checked:", at)
+            for _ in range(10):
+                send("\x1b[D")
+                settle(0.06)
+            fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 24, 80, 0, 0))
             proc.send_signal(signal.SIGWINCH)
             daemon_command("offline")
             wait("unavailable", send("\x1b[I"))
@@ -151,7 +167,7 @@ def run(mode, theme, suspend):
                 drain()
             assert proc.poll() == 0, "Pi did not exit cleanly"
             return {"mode": mode, "theme": theme, "bytes": len(transcript), "resize": True,
-                    "live_disconnect_recovery": True, "overview": True,
+                    "live_disconnect_recovery": True, "overview": True, "short_terminal": "80x24 / 40x24", "details_scroll": True, "host_widget_rows": 8,
                     "real_suspend_31s": suspend and not bool(os.environ.get("PI_TEST_SKIP_SUSPEND")), "exit": proc.returncode}
         finally:
             (EVIDENCE / ("pty-" + mode + ".log")).write_bytes(transcript)

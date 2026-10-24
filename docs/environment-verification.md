@@ -54,8 +54,10 @@ This is a bounded roughly one-minute trial, not an hours-long soak or a producti
 
 | Mode | Theme | Keyboard/overview | Resize | Disconnect/reconnect | Actual 31s SIGSTOP/SIGCONT | Exit |
 | --- | --- | --- | --- | --- | --- | --- |
-| regular | dark | pass | 110 → 40 → 110 columns | pass, panel/footer update together | pass | 0 |
-| fullscreen | light | pass | 110 → 40 → 110 columns | pass, panel/footer update together | not separately repeated | 0 |
+| regular | dark | pass; detail scrolling | 80×24 → 40×24 → 80×24 | pass, panel/footer update together | pass | 0 |
+| fullscreen | light | pass; detail scrolling | 80×24 → 40×24 → 80×24 | pass, panel/footer update together | not separately repeated | 0 |
+
+Both runs include eight extra host-widget rows. They assert that update actions remain visible at 24 rows and that left/right detail scrolling reveals `Checked` without changing action selection. The overlay is independent of the host's editor/widget height allocation.
 
 The tests use a loopback-only dummy chat provider and send only slash commands; no external model request or download is required. Raw terminal logs and result JSON are saved under `/tmp/pi-zvec-gap-evidence` by default. Keyboard input is drained between escape sequences to avoid confusing asynchronous native selectors with Alt-key sequences.
 
@@ -65,17 +67,29 @@ This is not a manual visual review in every terminal emulator. Two initial theme
 
 | Check | Result |
 | --- | --- |
-| Plugin `npm run check` | 179 tests: 177 pass, two Windows-specific skips |
-| Plugin coverage | 98.08% lines, 95.45% branches, 91.43% functions |
+| Plugin `npm run check` | 191 tests: 189 pass, two Windows-specific skips |
+| Plugin coverage | 97.09% lines, 95.15% branches, 92.79% functions; gates: 90/90/85 |
 | Backend ordinary tests, aggregated across isolated phases | 809 tests: 808 pass, one Windows-specific skip |
 | Backend merged coverage | 90.71% lines, 85.88% branches, 95.51% functions; all four global gates exceed 80% |
 | Backend real environment fixtures | Four pass; zero skipped |
-| Plugin environment subset | 31 pass, plus both real Pi PTY runs |
+| Plugin environment subset | 32 pass, plus both real Pi PTY runs at 24 rows |
+| Plugin dependency audit | Zero known vulnerabilities in the full locked dependency graph |
 | Static/package checks | Typechecks, backend lint/format, plugin dry-run pack and backend installed-package test pass |
+
+The backend figures are retained from the earlier acceptance run; the follow-up audit fixes only changed the plugin. Its lint/format/check/coverage, dependency audit, dry-run pack and real Pi PTY runs were repeated.
 
 One monolithic backend `npm run check` attempt failed with actual host `ENOSPC` during unit tests and coverage writes. Its root phase had passed all 456 tests. The failed run is not recorded as passing: remaining unit files, integration, end-to-end and installed-package checks were rerun with per-file disposable HOME directories; two further cleanup-boundary tests were added and passed. Coverage for the unchanged backend build was merged from these phases using installed Istanbul tooling, with all four 80% gates asserted. Generated raw coverage files were compacted/removed, not project indexes or model caches. Logs remain in `/tmp/zg-gaps-*.log` and `/tmp/pi-gaps-*.log`.
 
-The unplanned `ENOSPC` event is not a controlled disk-full recovery acceptance test. Free disk space was still about 3–4 GiB after verification; avoid another high-volume monolithic run without sufficient headroom.
+The unplanned `ENOSPC` event is not a controlled disk-full recovery acceptance test. Free disk space was about 3–4 GiB after that earlier backend verification; avoid another high-volume monolithic run without sufficient headroom.
+
+## Follow-up audit regression coverage
+
+- `test/models.test.ts` and `test/status.test.ts` use realistic `marker.files` records. Same-size changes, absent/malformed file records, and changes during confirmation cannot bypass download consent or reach index submission. Tests independently assert GGUF and Model2Vec artifact-key aliases rather than assuming local cache filenames are marker keys. A read-only check of the existing Qwen cache correctly reported `Downloaded` without reading weights or fetching files.
+- `test/metadata.test.ts` uses actual FIFOs and an isolated four-thread child process to verify prompt rejection, ordinary-I/O recovery and normal process exit. It also swaps a regular file to a FIFO between path inspection and open, exercising `O_NONBLOCK` and descriptor revalidation. Token/config/marker paths share a cancellable, hard 64 KiB reader; symlinks to ordinary files remain supported.
+- `test/menu.test.ts` verifies selection visibility at 40/80 columns and 16 available rows, shrinking to six/one row, restoring selection across read-only frames, and independent detail scrolling. The real PTY tests now exercise 24 terminal rows rather than only narrow columns in a 44-row terminal.
+- TypeScript's unused-code/fallthrough checks, Prettier and coverage thresholds are part of the existing CI path. The locked development host's exact Undici 8.10.2 dependency is overridden to 8.12.2, retaining Node 22.19 support and the Pi 1.4.0 API. This does not upgrade or patch global host installations.
+
+Kernel `stat`/`open` calls on a broken network filesystem cannot be interrupted by JavaScript cancellation; those mounts still require separate validation/process isolation. No test here claims otherwise.
 
 ## Reproduce
 

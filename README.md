@@ -113,7 +113,7 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 - Refreshing replaces the previous result with `checking`; failed or timed-out reads show `unavailable`. A wall-clock watchdog expires overdue snapshots after an event-loop pause. Terminal focus and `SIGCONT` trigger refresh; all listeners and timers are removed on session shutdown.
 - The panel and footer share the same coalesced request and update together, including while the menu is open. The `Checked` field records snapshot time. Unverified or expired frames cannot enable writes.
 - `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
-- The panel separates **Overview**, **Workspace**, and **Actions**, uses semantic status colors, dims secondary paths, aligns field labels, and wraps content in narrow terminals.
+- The panel separates **Overview**, **Workspace**, and **Actions** in a height-bounded overlay. **←/→** scroll details, **↑/↓** select actions, Enter selects, and Esc closes. The action list stays visible on short terminals, including 80×24 and 40×24; long details use Pi's native `ScrollView` independently from selection.
 - Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
 - Every write operation requires confirmation. Queued/running jobs, active Git operations, expired or unrecognized snapshots limit the menu to refresh, read-only overview, and close. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
 - Index jobs run in the daemon. Closing the menu or Pi does not cancel an already accepted job.
@@ -169,7 +169,9 @@ Switching the index means switching the current project's embedding model and re
 
 All writes that may use a local model share the same download-consent check: creation, model switching, incremental updates, and rebuilding with the existing model. A `Not downloaded` or `Cache unknown` model requires a separate **Download model?** confirmation before confirming the index operation. Cancelling either step prevents submission. Downloaded models skip download consent but still require operation confirmation. If the cache disappears during confirmation, the pre-submission check blocks that operation; select the action again to review download consent.
 
-Opening the model list only checks local completion markers and expected file sizes. It does not load models, connect to a model provider, download files, or rehash large model weights. Both Hugging Face and ModelScope caches are supported.
+Opening the model list checks local completion markers, expected file sizes, and each file's recorded `mtimeMs`/`ctimeMs`. Missing or stale per-file metadata is `Cache unknown`, so same-size mutations cannot skip download consent. It does not load models, connect to a model provider, download files, or rehash large model weights. Both Hugging Face and ModelScope caches are supported.
+
+Token files, the global configuration, and completion-marker JSON must resolve to ordinary files no larger than **64 KiB**. Reads are byte-bounded and cancellable; FIFOs/devices are rejected, including a POSIX file-to-FIFO replacement race. Invalid cache metadata never qualifies as downloaded. Existing symlinks to regular files still work. A blocked kernel `stat`/`open` on a broken network mount is outside these local-I/O guarantees.
 
 Cache directories are resolved in zvec-grep's order: `defaults.modelCacheDir` in `~/.zvec-grep/config.json`, then `ZVEC_GREP_MODEL_CACHE`, then `$ZVEC_GREP_HOME/models`, or the default `~/.zvec-grep/models`. Pi and the daemon must use the same cache settings. A daemon-only `--model-cache` argument cannot be discovered through the current status interface. Cache detection matches the 0.2.2 model snapshots and directory layout; it must be updated if later versions change them.
 
@@ -193,7 +195,9 @@ npm pack --dry-run
 
 For the reproducible menu-rendering benchmark, before/after measurements, and acceptance results, see [performance verification](docs/performance.md).
 
-Source and tests use TypeScript with strict type checking. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs type checking before the tests.
+Source and tests use strict TypeScript with unused-local, unused-parameter, and switch-fallthrough checks. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs compiler-based lint, Prettier verification, and the tests; `npm run format` applies code/config formatting. Git normalizes source files to LF on every OS. The pinned model snapshot table and npm-generated lockfile retain their producer's formatting.
+
+`npm run coverage` fails below **90% lines, 90% branches, or 85% functions**; the Linux Node 24 CI job enforces these gates. The locked development Pi 1.4.0 pins a vulnerable Undici version, so this checkout narrowly overrides `undici@8.10.2` to `8.12.2` without downgrading or replacing the host. This repository-level test dependency override does not patch an independently installed global Pi.
 
 The official MCP SDK is loaded on the first query, not in non-TUI modes. The custom menu loads only when opened and uses Pi's native pi-tui components without another UI framework. TypeScript, Node types, and the Pi/pi-tui packages used for development are `devDependencies`. Pi and pi-tui are also declared as host `peerDependencies` with `"*"` ranges and are not bundled, following the [official Pi package guidelines](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#declare-dependencies). Development dependency versions remain constrained for type checking and CI; wildcard host peers do not imply compatibility with every Pi release.
 
@@ -201,7 +205,7 @@ Tests also create real temporary Git repositories for branch/operation changes, 
 
 Tests cover state mapping, real HTTP MCP protocol exchanges with local mock servers, authentication, read-only calls, connection cleanup, refresh coalescing, footer deduplication and theme changes, menus, confirmations and cancellations, submission arguments, error recovery, and non-interactive modes.
 
-Tests use temporary caches and do not depend on models downloaded by the user. Regression cases include denied downloads, cache changes, malformed states never reporting ready, session switching/reloading, duplicate menus, HTTP 401/403, redirect rejection, token-file failures, submission-result validation, and accepted submissions whose responses time out without automatic retries.
+Tests use temporary caches and do not depend on models downloaded by the user. Regression cases include denied downloads, same-size cache mutations, realistic per-file completion metadata, bounded token/config/marker reads, FIFO replacement and I/O-pool recovery, short-terminal selection and detail scrolling, malformed states never reporting ready, session switching/reloading, duplicate menus, HTTP 401/403, redirect rejection, token-file failures, submission-result validation, and accepted submissions whose responses time out without automatic retries.
 
 `npm run check` includes a real Pi loader smoke test for package discovery and TypeScript loading. `npm run coverage` counts only extension source and filters out that smoke test by name to prevent jiti-transpiled copies from distorting original source line coverage. The full smoke test still runs in `check`.
 

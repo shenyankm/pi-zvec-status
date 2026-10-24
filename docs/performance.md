@@ -1,6 +1,6 @@
 # Menu performance verification
 
-## Change
+## Original render-cache change
 
 `lib/menu.ts` caches the static header and help text for the most recent terminal width. Repaints and selection changes reuse the parsed, themed, wrapped, and truncated lines. The action list still renders on every call, so keyboard selection remains live.
 
@@ -19,7 +19,7 @@ npm pack --dry-run
 
 For a baseline, run the same benchmark script against `lib/menu.ts` from commit `10d222b` in a separate checkout with dependencies installed. Do not compare total test-suite time as a performance metric.
 
-## Local results
+## Original local results
 
 Environment: Darwin arm64, Node v22.23.2, installed lockfile dependencies. Before/after runs used the same benchmark and machine.
 
@@ -32,7 +32,7 @@ Environment: Darwin arm64, Node v22.23.2, installed lockfile dependencies. Befor
 
 These are menu-rendering microbenchmarks, not end-to-end Pi speedups. The uncached resize/invalidation paths intentionally retain their existing work.
 
-## Acceptance
+## Original acceptance
 
 - TypeScript check and all 125 tests pass (124 before this change), including the Pi loader smoke test.
 - Regression tests verify reuse on repaint/navigation, live selection, output equivalence to a fresh menu after resize (including widths 0 and 1), and theme refresh after invalidation.
@@ -40,4 +40,10 @@ These are menu-rendering microbenchmarks, not end-to-end Pi speedups. The uncach
 - `npm pack --dry-run` succeeds; tests and benchmark are not included in the published package.
 - `git diff --check` passes.
 
-No live-daemon mutation, model download, interactive terminal walkthrough, or cross-platform CI run was performed. Use [the manual checklist](verification.md) for those checks. No project index was created or rebuilt for verification.
+That original render-cache acceptance did not perform a live-daemon mutation, model download, interactive terminal walkthrough, or cross-platform CI run. Use [the manual checklist](verification.md) for those checks. No project index was created or rebuilt for that original verification.
+
+## Height-bounded menu follow-up
+
+The audit follow-up keeps the cached header/help layout and uses a native `ScrollView` for details, while actions have their own height-bounded viewport. Left/right scrolling does not change the selected action. The real Pi tests cover 80×24 and 40×24 with eight additional host-widget rows in regular and fullscreen modes.
+
+One repeat on the same Darwin/Node setup measured 10.55 ms redraw, 10.18 ms navigation, 375.54 ms resize, and 401.41 ms invalidation per 2,000 renders. These are informational observations, not a performance gate; the static-layout caching benefit remains. The current functional/coverage results and limits are in [environment verification](environment-verification.md).

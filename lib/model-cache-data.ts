@@ -2,25 +2,25 @@
 export interface ModelSnapshot {
   directory: string;
   fingerprint: string;
-  files: [string, number][];
+  files: [localPath: string, size: number, artifactPath?: string][];
 }
 
 export const modelSnapshots: Record<string, ModelSnapshot[]> = {
   "local/qwen3-embedding-0.6b": [
-    {"directory":"","fingerprint":"cc8a5875f013bf011e1932e9","files":[["hf_Qwen_Qwen3-Embedding-0.6B-Q8_0.gguf",639150592]]},
+    {"directory":"","fingerprint":"cc8a5875f013bf011e1932e9","files":[["hf_Qwen_Qwen3-Embedding-0.6B-Q8_0.gguf",639150592,"Qwen3-Embedding-0.6B-Q8_0.gguf"]]},
     {"directory":"modelscope/llama-cpp/Qwen--Qwen3-Embedding-0.6B-GGUF/61ae123505fc6fa7f36d372fae1a30bc384241ea","fingerprint":"93b0ff2267bba27a5adb94d4","files":[["Qwen3-Embedding-0.6B-Q8_0.gguf",639150592]]},
   ],
   "local/potion-code-16m-v2": [
-    {"directory":"model2vec/minishlab--potion-code-16M-v2/e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b","fingerprint":"7db565dd4d3a5969b4c61568","files":[["model.safetensors",32490072],["tokenizer/tokenizer.json",1024340]]},
-    {"directory":"modelscope/model2vec/minishlab--potion-code-16M-v2/3e922fde18f43b8db69f3381b6d468738d3dd2d7","fingerprint":"dd1101fea40b5b4afdeadea4","files":[["model.safetensors",32490072],["tokenizer/tokenizer.json",1024340]]},
+    {"directory":"model2vec/minishlab--potion-code-16M-v2/e9d2a44ca6a05ac6685f3b23709ea57eb7352d5b","fingerprint":"7db565dd4d3a5969b4c61568","files":[["model.safetensors",32490072],["tokenizer/tokenizer.json",1024340,"tokenizer.json"]]},
+    {"directory":"modelscope/model2vec/minishlab--potion-code-16M-v2/3e922fde18f43b8db69f3381b6d468738d3dd2d7","fingerprint":"dd1101fea40b5b4afdeadea4","files":[["model.safetensors",32490072],["tokenizer/tokenizer.json",1024340,"tokenizer.json"]]},
   ],
   "local/potion-retrieval-32m": [
-    {"directory":"model2vec/minishlab--potion-retrieval-32M/6fc8051fab2a1e0ee76689cf08c853792ac285e7","fingerprint":"ce8f85ee04990db7b11fadc9","files":[["model.safetensors",129210456],["tokenizer/tokenizer.json",1493150]]},
-    {"directory":"modelscope/model2vec/minishlab--potion-retrieval-32M/33da23fc75cb732b5370bf25adde3db74b0d65b3","fingerprint":"fc9b7505795f33eb675295cd","files":[["model.safetensors",129210456],["tokenizer/tokenizer.json",1493150]]},
+    {"directory":"model2vec/minishlab--potion-retrieval-32M/6fc8051fab2a1e0ee76689cf08c853792ac285e7","fingerprint":"ce8f85ee04990db7b11fadc9","files":[["model.safetensors",129210456],["tokenizer/tokenizer.json",1493150,"tokenizer.json"]]},
+    {"directory":"modelscope/model2vec/minishlab--potion-retrieval-32M/33da23fc75cb732b5370bf25adde3db74b0d65b3","fingerprint":"fc9b7505795f33eb675295cd","files":[["model.safetensors",129210456],["tokenizer/tokenizer.json",1493150,"tokenizer.json"]]},
   ],
   "local/potion-multilingual-128m": [
-    {"directory":"model2vec/minishlab--potion-multilingual-128M/73908c3438cf03b6a01bcb9611d62b23d0726f08","fingerprint":"adbe103a0d1c82cbcc163ac4","files":[["model.safetensors",512361560],["tokenizer/tokenizer.json",18616131]]},
-    {"directory":"modelscope/model2vec/minishlab--potion-multilingual-128M/e8524678123f281add99f9745ac33d6604434dd7","fingerprint":"95920e151482e3444a6993fc","files":[["model.safetensors",512361560],["tokenizer/tokenizer.json",18616131]]},
+    {"directory":"model2vec/minishlab--potion-multilingual-128M/73908c3438cf03b6a01bcb9611d62b23d0726f08","fingerprint":"adbe103a0d1c82cbcc163ac4","files":[["model.safetensors",512361560],["tokenizer/tokenizer.json",18616131,"tokenizer.json"]]},
+    {"directory":"modelscope/model2vec/minishlab--potion-multilingual-128M/e8524678123f281add99f9745ac33d6604434dd7","fingerprint":"95920e151482e3444a6993fc","files":[["model.safetensors",512361560],["tokenizer/tokenizer.json",18616131,"tokenizer.json"]]},
   ],
   "local/multilingual-e5-small": [
     {"directory":"Xenova/multilingual-e5-small/761b726dd34fb83930e26aab4e9ac3899aa1fa78","fingerprint":"a6d8f01ab2e18750a6882ab4","files":[["config.json",658],["tokenizer.json",17082730],["tokenizer_config.json",443],["onnx/model_quantized.onnx",118308185]]},
@@ -35,7 +35,7 @@ export const modelSnapshots: Record<string, ModelSnapshot[]> = {
     {"directory":"modelscope/transformers-js/onnx-community--bge-small-en-v1.5-ONNX/f246b360b061b613fe0b449f2e14de12f875dad7","fingerprint":"4eb2901fe00ad41d5a5a8c33","files":[["config.json",867],["tokenizer.json",533603],["tokenizer_config.json",1271],["onnx/model_q4.onnx",132562],["onnx/model_q4.onnx_data",61185024]]},
   ],
   "local/embeddinggemma-300m": [
-    {"directory":"","fingerprint":"efec4039b54e689ff153b650","files":[["hf_ggml-org_embeddinggemma-300M-Q8_0.gguf",333590944]]},
+    {"directory":"","fingerprint":"efec4039b54e689ff153b650","files":[["hf_ggml-org_embeddinggemma-300M-Q8_0.gguf",333590944,"embeddinggemma-300M-Q8_0.gguf"]]},
     {"directory":"modelscope/llama-cpp/ggml-org--embeddinggemma-300M-GGUF/e2fab2963ac0943b1dc320cf0e267bd0e06e2e97","fingerprint":"b70108271b41741ba07d8eef","files":[["embeddinggemma-300M-Q8_0.gguf",333590944]]},
   ],
   "local/gte-modernbert-base": [

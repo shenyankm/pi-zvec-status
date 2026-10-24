@@ -8,7 +8,9 @@ import { setTimeout as delay } from "node:timers/promises";
 
 function deferred() {
   let resolve!: (value: string) => void;
-  const promise = new Promise<string>((done) => { resolve = done; });
+  const promise = new Promise<string>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -18,7 +20,11 @@ test("coalesces concurrent refreshes and discards late results on shutdown", asy
   let calls = 0;
   let signal!: AbortSignal;
   const monitor = createMonitor({
-    read: (s) => { calls++; signal = s; return wait.promise; },
+    read: (s) => {
+      calls++;
+      signal = s;
+      return wait.promise;
+    },
     render: (text) => rendered.push(text),
   });
   const first = monitor.refresh();
@@ -51,14 +57,27 @@ test("recovers from synchronous and asynchronous errors without leaking details"
   assert.match(result.error, /--mcp-toolset full/);
   await monitor.refresh();
   await monitor.refresh();
-  assert.deepEqual(rendered, ["zvec: checking", "zvec: unavailable", "zvec: checking", "zvec: unavailable", "zvec: checking", "zvec: ready"]);
+  assert.deepEqual(rendered, [
+    "zvec: checking",
+    "zvec: unavailable",
+    "zvec: checking",
+    "zvec: unavailable",
+    "zvec: checking",
+    "zvec: ready",
+  ]);
   await monitor.stop();
 });
 
 test("polls after completion, and clears polling on stop", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
-  const monitor = createMonitor({ read: async () => { calls++; return "ready"; }, render: () => {} });
+  const monitor = createMonitor({
+    read: async () => {
+      calls++;
+      return "ready";
+    },
+    render: () => {},
+  });
   await monitor.refresh();
   t.mock.timers.tick(29_999);
   assert.equal(calls, 1);
@@ -106,7 +125,10 @@ test("wall-clock expiry clears ready and recovers after an event-loop pause", as
   const pending = deferred();
   const rendered: string[] = [];
   let calls = 0;
-  const monitor = createMonitor({ read: async () => ++calls === 1 ? "zvec: ready" : pending.promise, render: (value) => rendered.push(value) });
+  const monitor = createMonitor({
+    read: async () => (++calls === 1 ? "zvec: ready" : pending.promise),
+    render: (value) => rendered.push(value),
+  });
   t.after(() => monitor.stop());
   await monitor.refresh();
   t.mock.timers.tick(60_000);
@@ -120,7 +142,11 @@ test("wall-clock expiry clears ready and recovers after an event-loop pause", as
 
 test("a reader ignoring cancellation cannot retain green status or block shutdown", async () => {
   const frames: string[] = [];
-  const monitor = createMonitor({ read: () => new Promise(() => {}), render: (text) => frames.push(text), timeoutMs: 15 });
+  const monitor = createMonitor({
+    read: () => new Promise(() => {}),
+    render: (text) => frames.push(text),
+    timeoutMs: 15,
+  });
   const [result] = await Promise.all([monitor.refresh(), delay(40)]);
   assert.ok(result?.error);
   assert.equal(frames.at(-1), "zvec: unavailable");
@@ -130,31 +156,62 @@ test("a reader ignoring cancellation cannot retain green status or block shutdow
 test("running jobs poll faster, then return to idle polling", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
   let calls = 0;
-  const monitor = createMonitor({ read: async () => ++calls === 1 ? "zvec: indexing 1/2" : "zvec: ready", render() {} });
+  const monitor = createMonitor({
+    read: async () => (++calls === 1 ? "zvec: indexing 1/2" : "zvec: ready"),
+    render() {},
+  });
   t.after(() => monitor.stop());
   await monitor.refresh();
-  t.mock.timers.tick(1999); assert.equal(calls, 1);
-  t.mock.timers.tick(1); await monitor.refresh(); assert.equal(calls, 2);
-  t.mock.timers.tick(29_999); assert.equal(calls, 2);
-  t.mock.timers.tick(1); await monitor.refresh(); assert.equal(calls, 3);
+  t.mock.timers.tick(1999);
+  assert.equal(calls, 1);
+  t.mock.timers.tick(1);
+  await monitor.refresh();
+  assert.equal(calls, 2);
+  t.mock.timers.tick(29_999);
+  assert.equal(calls, 2);
+  t.mock.timers.tick(1);
+  await monitor.refresh();
+  assert.equal(calls, 3);
 });
 
 test("outages back off retries and successful manual refresh resets the interval", async (t) => {
   t.mock.timers.enable({ apis: ["setTimeout"] });
-  let calls = 0; let offline = true;
-  const monitor = createMonitor({ read: async () => { calls++; if (offline) throw new Error("offline"); return "zvec: ready"; }, render() {} });
+  let calls = 0;
+  let offline = true;
+  const monitor = createMonitor({
+    read: async () => {
+      calls++;
+      if (offline) throw new Error("offline");
+      return "zvec: ready";
+    },
+    render() {},
+  });
   t.after(() => monitor.stop());
   await monitor.refresh();
-  t.mock.timers.tick(30_000); await monitor.refresh(); assert.equal(calls, 2);
-  t.mock.timers.tick(30_000); assert.equal(calls, 2);
-  t.mock.timers.tick(30_000); await monitor.refresh(); assert.equal(calls, 3);
-  offline = false; await monitor.refresh();
-  t.mock.timers.tick(30_000); await monitor.refresh(); assert.equal(calls, 5);
+  t.mock.timers.tick(30_000);
+  await monitor.refresh();
+  assert.equal(calls, 2);
+  t.mock.timers.tick(30_000);
+  assert.equal(calls, 2);
+  t.mock.timers.tick(30_000);
+  await monitor.refresh();
+  assert.equal(calls, 3);
+  offline = false;
+  await monitor.refresh();
+  t.mock.timers.tick(30_000);
+  await monitor.refresh();
+  assert.equal(calls, 5);
 });
 
 test("passes a deadline signal to the reader", async () => {
   let signal!: AbortSignal;
-  const monitor = createMonitor({ read: async (s) => { signal = s; return "ready"; }, render: () => {} });
+  const monitor = createMonitor({
+    read: async (s) => {
+      signal = s;
+      return "ready";
+    },
+    render: () => {},
+  });
   await monitor.refresh();
   assert.ok(signal instanceof AbortSignal);
   await monitor.stop();
@@ -165,14 +222,22 @@ test("extension registration and non-TUI sessions have no background activity", 
   const handlers = new Map();
   const commands = new Map();
   extension({
-    on: (name: string, handler: unknown) => { handlers.set(name, handler); return () => {}; },
-    registerCommand: (name: string, command: unknown) => { commands.set(name, command); },
+    on: (name: string, handler: unknown) => {
+      handlers.set(name, handler);
+      return () => {};
+    },
+    registerCommand: (name: string, command: unknown) => {
+      commands.set(name, command);
+    },
   } as unknown as ExtensionAPI);
   const notifications: string[] = [];
-  const ctx = { mode: "print", ui: {
-    setStatus: () => assert.fail("no status in print mode"),
-    notify: (text: string) => notifications.push(text),
-  } } as unknown as ExtensionContext;
+  const ctx = {
+    mode: "print",
+    ui: {
+      setStatus: () => assert.fail("no status in print mode"),
+      notify: (text: string) => notifications.push(text),
+    },
+  } as unknown as ExtensionContext;
   await handlers.get("session_start")({}, ctx);
   await commands.get("zvec").handler("", ctx);
   await handlers.get("session_shutdown")({}, ctx);

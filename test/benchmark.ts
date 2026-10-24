@@ -6,10 +6,13 @@ import { createIndexMenu } from "../lib/menu.ts";
 const theme = { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Theme;
 const options = ["Refresh status", "Rebuild index", "Close"];
 const snapshot = {
-  text: "zvec: ready · 11 files", busy: false,
+  text: "zvec: ready · 11 files",
+  busy: false,
   details: [
-    `Project: /workspace/${"项目".repeat(30)}`, "Status: ready · 11 files",
-    "Model: local/qwen3-embedding-0.6b", "Files: 11 · Pending: 0 · Failed: 0",
+    `Project: /workspace/${"项目".repeat(30)}`,
+    "Status: ready · 11 files",
+    "Model: local/qwen3-embedding-0.6b",
+    "Files: 11 · Pending: 0 · Failed: 0",
     `Index path: /workspace/${"nested/".repeat(20)}index.zvec`,
   ].join("\n"),
 };

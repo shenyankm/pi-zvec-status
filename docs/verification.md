@@ -34,12 +34,15 @@ Run the following manual checks before release. Use a disposable workspace, not 
 - [ ] Test an unborn branch, detached HEAD, a subdirectory, long CJK branch/worktree names, and a non-Git directory. Status must remain usable, and long names must wrap in the panel.
 - [ ] Switch branch or commit during a status query: the result must not be labeled ready for the new context. Switch during an operation confirmation: submission must be blocked and require a new selection.
 - [ ] Change the source file, then test incremental update, rebuild, and (optionally) model switching. Confirm each write operation explicitly.
-- [ ] If a local model cache becomes missing, updating/rebuilding with the existing model requires separate download consent too. Do not delete your real model cache just for this test; use a disposable daemon/cache if testing this case live.
+- [ ] If a local model cache becomes missing, updating/rebuilding with the existing model requires separate download consent too. In a disposable cache, mutate a file without changing its size: it must become `Cache unknown`, not downloaded. Do not alter your real model cache for this test.
 - [ ] Open a menu or confirmation dialog, then switch session or reload. The old dialog must not submit an operation; the new session must remain usable.
-- [ ] Try narrow/wide terminal widths, resize, theme switching, arrow-key navigation, Enter, and Esc. Test both regular and fullscreen terminal modes if used.
+- [ ] Test **80×24 and 40×24**, not only narrow widths in a tall terminal. Every selected action must remain visible; ←/→ must reveal all details without moving the selected action. Repeat with extra host widgets and in both regular/fullscreen modes.
+- [ ] Try resize, theme switching, arrow-key navigation, Enter, and Esc. A cancelled menu must restore the editor's focus.
 - [ ] With invalid MCP credentials or an unavailable daemon, the footer shows unavailable and notifications do not expose credentials or raw server errors.
 - [ ] After a submission timeout, refresh status before retrying. A timeout does not prove that the daemon rejected the job.
 
-The reproducible native-daemon load, process-kill, and real Pi PTY results are recorded in [environment verification](environment-verification.md). Run `npm run test:environments` on a POSIX host with the sibling backend built and installed dependencies. This does not establish Windows/UNC, network filesystem, literal disk-full, or power-loss behavior.
+The reproducible native-daemon load, process-kill, and real Pi PTY results are recorded in [environment verification](environment-verification.md). The regular-file/64 KiB I/O limits and FIFO race tests run in `npm run check`; the FIFO child is force-bounded to avoid stranding the test runner if this protection regresses. Coverage enforces 90% lines, 90% branches, and 85% functions.
+
+Run `npm run test:environments` on a POSIX host with the sibling backend built and installed dependencies. This does not establish Windows/UNC, network filesystem, literal disk-full, or power-loss behavior.
 
 Record Node, Pi, OS, zvec-grep version, and cache configuration with the results. Once Pi has exited, verify the temporary path before cleaning up the disposable workspace/index. Do not remove a shared model cache.

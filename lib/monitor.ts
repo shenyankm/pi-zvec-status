@@ -51,7 +51,9 @@ export function createMonitor({ read, render, intervalMs = 30_000, timeoutMs = 1
         signal.removeEventListener("abort", onAbort);
         pending = undefined;
         if (!stopped) {
-          timer = setTimeout(() => { void refresh(); }, refreshAfterMs);
+          timer = setTimeout(() => {
+            void refresh();
+          }, refreshAfterMs);
           timer.unref();
         }
       }

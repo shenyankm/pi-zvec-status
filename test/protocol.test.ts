@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { join } from "node:path";
+import { writeFile } from "node:fs/promises";
+import { MAX_METADATA_BYTES } from "../lib/metadata.ts";
 import { indexWorkspace, readStatus } from "../lib/status.ts";
 import { cacheFixture, mockServer, serve } from "./helpers.ts";
 
@@ -18,7 +20,10 @@ for (const status of [401, 403]) {
 
 test("HTTP redirects are refused and credentials never reach the target", async (t) => {
   let targetRequests = 0;
-  const target = await serve(t, (_req, res) => { targetRequests++; res.writeHead(500).end(); });
+  const target = await serve(t, (_req, res) => {
+    targetRequests++;
+    res.writeHead(500).end();
+  });
   const env = await serve(t, (_req, res) => {
     res.writeHead(302, { Location: target.ZVEC_GREP_SERVER_URL! }).end();
   });
@@ -28,10 +33,35 @@ test("HTTP redirects are refused and credentials never reach the target", async 
 
 test("an unreadable token file fails before connecting", async (t) => {
   const { home } = await cacheFixture(t);
-  const { calls, env } = await mockServer(t, { result: { content: [], structuredContent: { root: "/workspace", indexed: true } } });
-  await assert.rejects(readStatus("/workspace", AbortSignal.timeout(3000), {
-    ...env, ZVEC_GREP_SERVER_TOKEN: undefined, ZVEC_GREP_SERVER_TOKEN_FILE: join(home, "missing-token"),
-  }), { code: "ENOENT" });
+  const { calls, env } = await mockServer(t, {
+    result: { content: [], structuredContent: { root: "/workspace", indexed: true } },
+  });
+  await assert.rejects(
+    readStatus("/workspace", AbortSignal.timeout(3000), {
+      ...env,
+      ZVEC_GREP_SERVER_TOKEN: undefined,
+      ZVEC_GREP_SERVER_TOKEN_FILE: join(home, "missing-token"),
+    }),
+    { code: "ENOENT" },
+  );
+  assert.equal(calls.length, 0);
+});
+
+test("an oversized token is rejected before connecting", async (t) => {
+  const { home } = await cacheFixture(t);
+  const token = join(home, "token");
+  await writeFile(token, "x".repeat(MAX_METADATA_BYTES + 1));
+  const { calls, env } = await mockServer(t, {
+    result: { content: [], structuredContent: { root: "/workspace", indexed: false } },
+  });
+  await assert.rejects(
+    readStatus("/workspace", AbortSignal.timeout(2000), {
+      ...env,
+      ZVEC_GREP_SERVER_TOKEN: undefined,
+      ZVEC_GREP_SERVER_TOKEN_FILE: token,
+    }),
+    /64 KiB limit/,
+  );
   assert.equal(calls.length, 0);
 });
 
@@ -61,15 +91,25 @@ for (const text of ["", "not json", "null", "[]"]) {
 test("a stalled session cleanup cannot publish ready after the deadline", async (t) => {
   let cleanupStarted = false;
   const env = await serve(t, async (req, res) => {
-    if (req.method === "DELETE") { cleanupStarted = true; return; }
-    if (req.method !== "POST") { res.writeHead(405).end(); return; }
+    if (req.method === "DELETE") {
+      cleanupStarted = true;
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405).end();
+      return;
+    }
     let body = "";
     for await (const chunk of req) body += chunk;
     const message = JSON.parse(body);
-    if (message.id === undefined) { res.writeHead(202).end(); return; }
-    const result = message.method === "initialize"
-      ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
-      : { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } };
+    if (message.id === undefined) {
+      res.writeHead(202).end();
+      return;
+    }
+    const result =
+      message.method === "initialize"
+        ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
+        : { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } };
     res.writeHead(200, { "Content-Type": "application/json", "mcp-session-id": "stall-cleanup" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   });
@@ -82,15 +122,26 @@ test("a stalled session cleanup cannot publish ready after the deadline", async 
 test("unsupported session termination does not discard a valid status result", async (t) => {
   let deletes = 0;
   const env = await serve(t, async (req, res) => {
-    if (req.method === "DELETE") { deletes++; res.writeHead(405).end(); return; }
-    if (req.method !== "POST") { res.writeHead(405).end(); return; }
+    if (req.method === "DELETE") {
+      deletes++;
+      res.writeHead(405).end();
+      return;
+    }
+    if (req.method !== "POST") {
+      res.writeHead(405).end();
+      return;
+    }
     let body = "";
     for await (const chunk of req) body += chunk;
     const message = JSON.parse(body);
-    if (message.id === undefined) { res.writeHead(202).end(); return; }
-    const result = message.method === "initialize"
-      ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
-      : { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } };
+    if (message.id === undefined) {
+      res.writeHead(202).end();
+      return;
+    }
+    const result =
+      message.method === "initialize"
+        ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
+        : { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } };
     res.writeHead(200, { "Content-Type": "application/json", "mcp-session-id": "test-session" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   });

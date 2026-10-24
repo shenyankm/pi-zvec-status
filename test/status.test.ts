@@ -1,14 +1,14 @@
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
-import { test, type TestContext } from "node:test";
+import { test } from "node:test";
 import type { AddressInfo } from "node:net";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { mkdtemp, writeFile, rm, utimes } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import extension from "../index.ts";
-import { describeStatus, indexWorkspace, readStatus, readSnapshot, serverUrl } from "../lib/status.ts";
+import { describeStatus, readStatus, readSnapshot, serverUrl } from "../lib/status.ts";
 import { openPanel } from "../lib/panel.ts";
 import { isolateModelCache, mockServer, setEnv } from "./helpers.ts";
 
@@ -18,7 +18,7 @@ type MenuFactory = Parameters<ExtensionContext["ui"]["custom"]>[0];
 
 async function renderMenu(factory: MenuFactory) {
   const component = await factory(
-    { requestRender() {} } as Parameters<MenuFactory>[0],
+    { requestRender() {}, terminal: { rows: 60 } } as Parameters<MenuFactory>[0],
     { fg: (_color: string, text: string) => text, bold: (text: string) => text } as Parameters<MenuFactory>[1],
     {} as Parameters<MenuFactory>[2],
     () => {},
@@ -27,14 +27,22 @@ async function renderMenu(factory: MenuFactory) {
 }
 
 for (const [name, patch, expected] of [
-  ["Node ready", { status: undefined, persistent: { files: { stored: 42, pending: 0, failed: 0 } } }, "ready · 42 files"],
+  [
+    "Node ready",
+    { status: undefined, persistent: { files: { stored: 42, pending: 0, failed: 0 } } },
+    "ready · 42 files",
+  ],
   ["Rust ready", { status: "ready" }, "ready"],
   ["missing", { indexed: false }, "no index"],
   ["disabled", { indexed: false, index_policy: "disabled" }, "disabled"],
   ["rebuild", { indexed: false, compatibility: { status: "rebuild_required" } }, "rebuild required"],
   ["queued", { runtime: { job_state: "queued" } }, "queued"],
   ["running", { runtime: { job_state: "running", completion: { completed: 3, total: 10 } } }, "indexing 3/10"],
-  ["clamps progress", { runtime: { job_state: "running", completion: { completed: 12, total: 10 } } }, "indexing 10/10"],
+  [
+    "clamps progress",
+    { runtime: { job_state: "running", completion: { completed: 12, total: 10 } } },
+    "indexing 10/10",
+  ],
   ["no NaN progress", { runtime: { job_state: "running", completion: { completed: -1, total: 0 } } }, "indexing"],
   ["failed job", { runtime: { job_state: "failed" } }, "failed"],
   ["failed files", { persistent: { files: { failed: 1 } } }, "failed"],
@@ -58,24 +66,39 @@ for (const [name, patch, expected] of [
   ["invalid policy", { index_policy: false }, "unknown"],
   ["undecided policy without index", { index_policy: "undecided", indexed: false }, "no index"],
   ["minimal response has no readiness evidence", { status: undefined }, "unknown"],
-  ["successful job alone is not readiness evidence", { status: undefined, runtime: { job_state: "succeeded" } }, "unknown"],
+  [
+    "successful job alone is not readiness evidence",
+    { status: undefined, runtime: { job_state: "succeeded" } },
+    "unknown",
+  ],
   ["unknown compatibility never ready", { compatibility: { status: "future_incompatible" } }, "unknown"],
   ["empty compatibility never ready", { compatibility: { status: "" } }, "unknown"],
   ["known compatible index", { compatibility: { status: "compatible" } }, "ready"],
   ["partial file counters", { status: undefined, persistent: { files: { stored: 42 } } }, "unknown"],
   ["partial revisions", { runtime: { dirty_revision: 9 } }, "unknown"],
   ["missing dirty revision", { runtime: { indexed_revision: 9 } }, "unknown"],
-  ["Node empty index", { status: undefined, persistent: { files: { stored: 0, pending: 0, failed: 0 } } }, "ready · 0 files"],
+  [
+    "Node empty index",
+    { status: undefined, persistent: { files: { stored: 0, pending: 0, failed: 0 } } },
+    "ready · 0 files",
+  ],
 ] satisfies [string, Record<string, unknown>, string][]) {
   test(name, () => assert.equal(describeStatus({ ...base, ...patch }), `zvec: ${expected}`));
 }
 
 for (const field of ["added", "modified", "deleted"]) {
   test(`${field} files override historical success and equal revisions`, () => {
-    const data = { ...base, status: undefined, runtime: { job_state: "succeeded", dirty_revision: 2, indexed_revision: 2 },
-      persistent: { files: { stored: 42, pending: 0, failed: 0, [field]: 1 } } };
+    const data = {
+      ...base,
+      status: undefined,
+      runtime: { job_state: "succeeded", dirty_revision: 2, indexed_revision: 2 },
+      persistent: { files: { stored: 42, pending: 0, failed: 0, [field]: 1 } },
+    };
     assert.equal(describeStatus(data), "zvec: stale");
-    assert.equal(describeStatus({ ...data, persistent: { files: { ...data.persistent.files, [field]: 0 } } }), "zvec: ready · 42 files");
+    assert.equal(
+      describeStatus({ ...data, persistent: { files: { ...data.persistent.files, [field]: 0 } } }),
+      "zvec: ready · 42 files",
+    );
   });
   test(`invalid ${field} count cannot enable ready`, () => {
     assert.equal(describeStatus({ ...base, persistent: { files: { [field]: "2" } } }), "zvec: unknown");
@@ -93,11 +116,16 @@ test("only accepts loopback URLs and refuses credential-bearing URLs", () => {
   for (const url of [undefined, "http://localhost:7999/mcp", "http://[::1]:7999/mcp"]) {
     assert.ok(serverUrl(url));
   }
-  for (const url of ["https://example.com/mcp", "file:///etc/passwd", "http://user:pass@localhost/mcp", "http://localhost/mcp?token=secret", "http://localhost/mcp#secret"]) {
+  for (const url of [
+    "https://example.com/mcp",
+    "file:///etc/passwd",
+    "http://user:pass@localhost/mcp",
+    "http://localhost/mcp?token=secret",
+    "http://localhost/mcp#secret",
+  ]) {
     assert.throws(() => serverUrl(url));
   }
 });
-
 
 test("real HTTP MCP handshake, read-only call, auth, and session cleanup", async (t) => {
   const { calls, env } = await mockServer(t, { result: { content: [], structuredContent: base } });
@@ -120,7 +148,9 @@ test("full toolset missing is actionable", async (t) => {
 });
 
 test("tool failures are not mistaken for index readiness", async (t) => {
-  const { env } = await mockServer(t, { result: { isError: true, content: [{ type: "text", text: "secret server error" }] } });
+  const { env } = await mockServer(t, {
+    result: { isError: true, content: [{ type: "text", text: "secret server error" }] },
+  });
   await assert.rejects(readStatus("/workspace", AbortSignal.timeout(2000), env), /Index status rejected/);
 });
 
@@ -137,17 +167,25 @@ test("token files are trimmed and direct tokens take precedence", async (t) => {
   env.ZVEC_GREP_SERVER_TOKEN = "direct-secret";
   env.ZVEC_GREP_SERVER_TOKEN_FILE = join(directory, "does-not-exist");
   await readStatus("/workspace", AbortSignal.timeout(2000), env);
-  assert.equal(calls.filter((call) => call.message?.method === "tools/call").at(-1)!.authorization, "Bearer direct-secret");
+  assert.equal(
+    calls.filter((call) => call.message?.method === "tools/call").at(-1)!.authorization,
+    "Bearer direct-secret",
+  );
 });
 
 test("a stalled HTTP initialization is cancelled at the deadline", async (t) => {
   const server = createServer(() => {});
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
-  t.after(() => { server.closeAllConnections(); return new Promise((resolve) => server.close(resolve)); });
-  await assert.rejects(readStatus("/workspace", AbortSignal.timeout(50), {
-    ZVEC_GREP_SERVER_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`,
-  }));
+  t.after(() => {
+    server.closeAllConnections();
+    return new Promise((resolve) => server.close(resolve));
+  });
+  await assert.rejects(
+    readStatus("/workspace", AbortSignal.timeout(50), {
+      ZVEC_GREP_SERVER_URL: `http://127.0.0.1:${(server.address() as AddressInfo).port}/mcp`,
+    }),
+  );
 });
 
 test("single zvec command shares snapshots and reports refresh phases", async (t) => {
@@ -168,27 +206,43 @@ test("single zvec command shares snapshots and reports refresh phases", async (t
   const notifications: string[] = [];
   const panels: string[] = [];
   extension({
-    on: (name: string, handler: unknown) => { handlers.set(name, handler); return () => {}; },
-    registerCommand: (name: string, command: unknown) => { commands.set(name, command); },
+    on: (name: string, handler: unknown) => {
+      handlers.set(name, handler);
+      return () => {};
+    },
+    registerCommand: (name: string, command: unknown) => {
+      commands.set(name, command);
+    },
   } as unknown as ExtensionAPI);
-  const ctx = { mode: "tui", cwd: "/workspace", ui: {
-    theme: { fg: (_color: string, text: string) => text },
-    setStatus: (key: string, text: string | undefined) => statuses.push([key, text]),
-    notify: (text: string) => notifications.push(text),
-    custom: async (factory: MenuFactory) => { panels.push(await renderMenu(factory)); return "Close"; },
-  } } as unknown as ExtensionContext;
+  const ctx = {
+    mode: "tui",
+    cwd: "/workspace",
+    ui: {
+      theme: { fg: (_color: string, text: string) => text },
+      setStatus: (key: string, text: string | undefined) => statuses.push([key, text]),
+      notify: (text: string) => notifications.push(text),
+      custom: async (factory: MenuFactory) => {
+        panels.push(await renderMenu(factory));
+        return "Close";
+      },
+    },
+  } as unknown as ExtensionContext;
   t.after(() => handlers.get("session_shutdown")({}, ctx));
   await handlers.get("session_start")({}, ctx);
   assert.deepEqual([...commands.keys()], ["zvec"]);
   await commands.get("zvec").handler("", ctx);
-  assert.deepEqual(statuses.slice(0, 2), [["zvec-status", "◌ zvec · checking"], ["zvec-status", "● zvec · ready (last check)"]]);
+  assert.deepEqual(statuses.slice(0, 2), [
+    ["zvec-status", "◌ zvec · checking"],
+    ["zvec-status", "● zvec · ready (last check)"],
+  ]);
   assert.equal(statuses.at(-1)![1], "● zvec · ready (last check)");
   assert.match(panels[0], /Project:\s+\/workspace/);
   await commands.get("zvec").handler("", ctx);
   response.persistent.files.stored = 2;
   await commands.get("zvec").handler("", ctx);
   assert.equal(statuses.at(-1)![1], "● zvec · ready (last check)");
-  for (let index = 1; index < statuses.length; index++) assert.notEqual(statuses[index][1], statuses[index - 1][1], "identical footer frames remain deduplicated");
+  for (let index = 1; index < statuses.length; index++)
+    assert.notEqual(statuses[index][1], statuses[index - 1][1], "identical footer frames remain deduplicated");
   assert.match(panels.at(-1)!, /ready · 2 files/);
   assert.deepEqual(notifications, []);
   ctx.ui.theme.fg = (_color, text) => `[${text}]`;
@@ -208,20 +262,36 @@ test("aborted requests do not connect", async (t) => {
 });
 
 test("completed legacy jobs still show stale and drift for unprocessed deletions", async (t) => {
-  const { env } = await mockServer(t, { result: { content: [], structuredContent: {
-    ...base, status: undefined, runtime: { job_state: "succeeded", dirty_revision: 2, indexed_revision: 2 },
-    persistent: { files: { stored: 1545, pending: 0, failed: 0, added: 0, modified: 0, deleted: 2 } },
-  } } });
+  const { env } = await mockServer(t, {
+    result: {
+      content: [],
+      structuredContent: {
+        ...base,
+        status: undefined,
+        runtime: { job_state: "succeeded", dirty_revision: 2, indexed_revision: 2 },
+        persistent: { files: { stored: 1545, pending: 0, failed: 0, added: 0, modified: 0, deleted: 2 } },
+      },
+    },
+  });
   const snapshot = await readSnapshot("/workspace", AbortSignal.timeout(2000), env);
   assert.equal(snapshot.text, "zvec: stale");
   assert.match(snapshot.details, /Index drift: \+0 ~0 -2/);
 });
 
 test("running snapshots explain file-level progress and expose sanitized activity", async (t) => {
-  const { env } = await mockServer(t, { result: { content: [], structuredContent: {
-    ...base, runtime: { job_state: "running", completion: { completed: 1444, total: 1543 },
-      progress: { detail: "embedding generated/THIRD-PARTY.txt\x1b[2J\n" } },
-  } } });
+  const { env } = await mockServer(t, {
+    result: {
+      content: [],
+      structuredContent: {
+        ...base,
+        runtime: {
+          job_state: "running",
+          completion: { completed: 1444, total: 1543 },
+          progress: { detail: "embedding generated/THIRD-PARTY.txt\x1b[2J\n" },
+        },
+      },
+    },
+  });
   const snapshot = await readSnapshot("/workspace", AbortSignal.timeout(2000), env);
   assert.equal(snapshot.text, "zvec: indexing 1444/1543");
   assert.match(snapshot.details, /Activity: embedding generated\/THIRD-PARTY.txt/);
@@ -230,13 +300,19 @@ test("running snapshots explain file-level progress and expose sanitized activit
 });
 
 test("snapshot includes model and file counts without terminal control characters", async (t) => {
-  const { env } = await mockServer(t, { result: { content: [], structuredContent: {
-    ...base, persistent: {
-      index_path: "/workspace/.zvec-grep/\u001b[2J",
-      workspace_index: { embedding: { provider: "local", model: "qwen3-embedding-0.6b" } },
-      files: { stored: 4, pending: 2, failed: 1 },
+  const { env } = await mockServer(t, {
+    result: {
+      content: [],
+      structuredContent: {
+        ...base,
+        persistent: {
+          index_path: "/workspace/.zvec-grep/\u001b[2J",
+          workspace_index: { embedding: { provider: "local", model: "qwen3-embedding-0.6b" } },
+          files: { stored: 4, pending: 2, failed: 1 },
+        },
+      },
     },
-  } } });
+  });
   const snapshot = await readSnapshot("/workspace", AbortSignal.timeout(2000), env);
   assert.equal(snapshot.model, "local/qwen3-embedding-0.6b");
   assert.match(snapshot.details, /Files: 4 · Pending: 2 · Failed: 1/);
@@ -257,6 +333,7 @@ interface PanelCase {
   failure?: boolean;
   submissionTimeout?: boolean;
   cacheRemoved?: boolean;
+  cacheMutated?: boolean;
   missingModel?: boolean;
   invalidStatus?: boolean;
   expected?: Record<string, unknown>;
@@ -273,34 +350,86 @@ for (const scenario of [
   { name: "job started during confirmation", choices: ["Rebuild index", "Close"], changed: true },
   { name: "incremental update", choices: ["Update index (incremental)"], expected: {} },
   { name: "rebuild", choices: ["Rebuild index"], expected: { rebuild: true } },
-  { name: "switch model", choices: ["Switch model and rebuild", "local/potion-code-16m-v2"],
-    expected: { rebuild: true, embedding: "local/potion-code-16m-v2" } },
-  { name: "create", choices: ["Create index", "local/qwen3-embedding-0.6b"], indexed: false,
-    expected: { embedding: "local/qwen3-embedding-0.6b" } },
+  {
+    name: "switch model",
+    choices: ["Switch model and rebuild", "local/potion-code-16m-v2"],
+    expected: { rebuild: true, embedding: "local/potion-code-16m-v2" },
+  },
+  {
+    name: "create",
+    choices: ["Create index", "local/qwen3-embedding-0.6b"],
+    indexed: false,
+    expected: { embedding: "local/qwen3-embedding-0.6b" },
+  },
   { name: "rejected submission", choices: ["Rebuild index"], expected: { rebuild: true }, failure: true },
-  { name: "cached switch skips download consent", choices: ["Switch model and rebuild", "local/potion-code-16m-v2"],
-    cache: "Downloaded", expected: { rebuild: true, embedding: "local/potion-code-16m-v2" } },
-  { name: "decline download for create", choices: ["Create index", "local/qwen3-embedding-0.6b", "Close"],
-    indexed: false, downloadConfirm: false },
-  { name: "allow download but decline create", choices: ["Create index", "local/qwen3-embedding-0.6b", "Close"],
-    indexed: false, confirm: false },
+  {
+    name: "cached switch skips download consent",
+    choices: ["Switch model and rebuild", "local/potion-code-16m-v2"],
+    cache: "Downloaded",
+    expected: { rebuild: true, embedding: "local/potion-code-16m-v2" },
+  },
+  {
+    name: "decline download for create",
+    choices: ["Create index", "local/qwen3-embedding-0.6b", "Close"],
+    indexed: false,
+    downloadConfirm: false,
+  },
+  {
+    name: "allow download but decline create",
+    choices: ["Create index", "local/qwen3-embedding-0.6b", "Close"],
+    indexed: false,
+    confirm: false,
+  },
   { name: "decline download for rebuild", choices: ["Rebuild index", "Close"], downloadConfirm: false },
-  { name: "decline download for incremental update", choices: ["Update index (incremental)", "Close"], downloadConfirm: false },
-  { name: "unknown cache still requires consent", choices: ["Rebuild index", "Close"], cache: "Cache unknown", downloadConfirm: false },
+  {
+    name: "decline download for incremental update",
+    choices: ["Update index (incremental)", "Close"],
+    downloadConfirm: false,
+  },
+  {
+    name: "unknown cache still requires consent",
+    choices: ["Rebuild index", "Close"],
+    cache: "Cache unknown",
+    downloadConfirm: false,
+  },
   { name: "abort during download consent", choices: ["Rebuild index"], abortDownload: true },
-  { name: "cache removed during confirmation", choices: ["Rebuild index", "Close"], cache: "Downloaded", cacheRemoved: true },
+  {
+    name: "cache removed during confirmation",
+    choices: ["Rebuild index", "Close"],
+    cache: "Downloaded",
+    cacheRemoved: true,
+  },
+  {
+    name: "same-size cache mutation during confirmation blocks submission",
+    choices: ["Rebuild index", "Close"],
+    cache: "Downloaded",
+    cacheMutated: true,
+  },
   { name: "missing model blocks submission", choices: ["Rebuild index", "Close"], missingModel: true },
   { name: "malformed status only allows viewing", choices: ["Close"], invalidStatus: true },
-  { name: "accepted submission times out without retry", choices: ["Rebuild index"], submissionTimeout: true, expected: { rebuild: true } },
+  {
+    name: "accepted submission times out without retry",
+    choices: ["Rebuild index"],
+    submissionTimeout: true,
+    expected: { rebuild: true },
+  },
 ] satisfies PanelCase[]) {
   test(`panel: ${scenario.name}`, async (t) => {
     const config: PanelCase = scenario;
-    const fixture = await isolateModelCache(t, config.cache === "Downloaded"
-      ? ["local/qwen3-embedding-0.6b", "local/potion-code-16m-v2"] : [], config.cache === "Cache unknown");
+    const fixture = await isolateModelCache(
+      t,
+      config.cache === "Downloaded" ? ["local/qwen3-embedding-0.6b", "local/potion-code-16m-v2"] : [],
+      config.cache === "Cache unknown",
+    );
     const snapshot = {
-      ...base, indexed: config.indexed ?? true,
+      ...base,
+      indexed: config.indexed ?? true,
       runtime: { job_state: config.invalidStatus ? "future_status" : config.busy ? "running" : "succeeded" },
-      persistent: { workspace_index: config.missingModel ? undefined : { embedding: { provider: "local", model: "qwen3-embedding-0.6b" } } },
+      persistent: {
+        workspace_index: config.missingModel
+          ? undefined
+          : { embedding: { provider: "local", model: "qwen3-embedding-0.6b" } },
+      },
     };
     const requestDeadline = new AbortController();
     if (config.submissionTimeout) t.mock.method(AbortSignal, "timeout", () => requestDeadline.signal);
@@ -310,9 +439,11 @@ for (const scenario of [
         snapshot.runtime.job_state = "running";
         requestDeadline.abort(new DOMException("Response deadline exceeded", "TimeoutError"));
       }
-      return { result: config.failure
-        ? { isError: true, content: [{ type: "text", text: "secret-token" }] }
-        : { content: [], structuredContent: { state: "running" } } };
+      return {
+        result: config.failure
+          ? { isError: true, content: [{ type: "text", text: "secret-token" }] }
+          : { content: [], structuredContent: { state: "running" } },
+      };
     });
     setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
     const controller = new AbortController();
@@ -323,29 +454,41 @@ for (const scenario of [
     let confirmations = 0;
     let downloadConfirmations = 0;
     const prompts: { title: string; message: string }[] = [];
-    const ctx = { cwd: "/workspace", ui: {
-      custom: async (factory: MenuFactory) => { menus.push(await renderMenu(factory)); return choices.shift(); },
-      select: async (_title: string, labels: string[]) => {
-        const model = choices.shift();
-        modelMenus.push(labels);
-        const label = labels.find((label) => model && label.endsWith(model));
-        return label;
+    const ctx = {
+      cwd: "/workspace",
+      ui: {
+        custom: async (factory: MenuFactory) => {
+          menus.push(await renderMenu(factory));
+          return choices.shift();
+        },
+        select: async (_title: string, labels: string[]) => {
+          const model = choices.shift();
+          modelMenus.push(labels);
+          const label = labels.find((label) => model && label.endsWith(model));
+          return label;
+        },
+        confirm: async (title: string, message: string) => {
+          prompts.push({ title, message });
+          if (title === "Download model?") {
+            downloadConfirmations++;
+            if (config.abortDownload) controller.abort();
+            return config.downloadConfirm ?? true;
+          }
+          confirmations++;
+          if (config.abort) controller.abort();
+          if (config.changed) snapshot.runtime.job_state = "running";
+          if (config.cacheRemoved) await rm(fixture.cache, { recursive: true, force: true });
+          if (config.cacheMutated)
+            await utimes(
+              join(fixture.cache, "hf_Qwen_Qwen3-Embedding-0.6B-Q8_0.gguf"),
+              new Date(),
+              new Date(Date.now() + 2000),
+            );
+          return config.confirm ?? true;
+        },
+        notify: (message: string) => notifications.push(message),
       },
-      confirm: async (title: string, message: string) => {
-        prompts.push({ title, message });
-        if (title === "Download model?") {
-          downloadConfirmations++;
-          if (config.abortDownload) controller.abort();
-          return config.downloadConfirm ?? true;
-        }
-        confirmations++;
-        if (config.abort) controller.abort();
-        if (config.changed) snapshot.runtime.job_state = "running";
-        if (config.cacheRemoved) await rm(fixture.cache, { recursive: true, force: true });
-        return config.confirm ?? true;
-      },
-      notify: (message: string) => notifications.push(message),
-    } } as unknown as ExtensionContext;
+    } as unknown as ExtensionContext;
     await openPanel(ctx, controller.signal);
     if (config.busy || config.invalidStatus) {
       assert.match(menus[0], /Refresh status/);
@@ -357,10 +500,12 @@ for (const scenario of [
     if (config.expected) {
       assert.equal(confirmations, 1);
       assert.equal(downloadConfirmations, config.cache === "Downloaded" ? 0 : 1);
-      assert.deepEqual(writes[0].message?.params?.arguments,
-        { root: "/workspace", ...config.expected, wait: false });
+      assert.deepEqual(writes[0].message?.params?.arguments, { root: "/workspace", ...config.expected, wait: false });
       assert.equal(notifications.length, 1);
-      assert.match(notifications[0], config.failure || config.submissionTimeout ? /refresh status before retrying/ : /submitted/);
+      assert.match(
+        notifications[0],
+        config.failure || config.submissionTimeout ? /refresh status before retrying/ : /submitted/,
+      );
     }
     if (config.downloadConfirm === false || config.abortDownload) {
       assert.equal(downloadConfirmations, 1);
@@ -370,18 +515,21 @@ for (const scenario of [
       assert.ok(labels.every((label) => /^\[(Downloaded|Not downloaded|Cache unknown)\]/.test(label)));
     }
     for (const prompt of prompts) {
-      assert.match(prompt.message, prompt.title === "Download model?" ? /network bandwidth and local disk space/ : /Project: \/workspace/);
+      assert.match(
+        prompt.message,
+        prompt.title === "Download model?" ? /network bandwidth and local disk space/ : /Project: \/workspace/,
+      );
     }
     if (downloadConfirmations && confirmations) assert.equal(prompts[0].title, "Download model?");
     if (config.changed) assert.match(notifications[0], /state has changed/);
-    if (config.cacheRemoved) assert.match(notifications[0], /cache has changed/);
+    if (config.cacheRemoved || config.cacheMutated) assert.match(notifications[0], /cache has changed/);
     if (config.missingModel) assert.match(notifications[0], /Cannot determine the embedding model/);
     if (config.submissionTimeout) {
       t.mock.restoreAll();
       assert.equal(await readStatus("/workspace", new AbortController().signal, env), "zvec: indexing");
       assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
     }
-    if (!config.expected && !config.changed && !config.cacheRemoved && !config.missingModel) {
+    if (!config.expected && !config.changed && !config.cacheRemoved && !config.cacheMutated && !config.missingModel) {
       assert.deepEqual(notifications, [], "viewing or cancelling must not hide a UI or assertion error");
     }
     assert.ok(notifications.every((message) => !message.includes("secret-token")));

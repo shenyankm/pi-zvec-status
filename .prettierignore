@@ -1,0 +1,3 @@
+# Generated snapshots and npm's lockfile retain their producer's formatting.
+lib/model-cache-data.ts
+package-lock.json

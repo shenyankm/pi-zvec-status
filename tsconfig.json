@@ -4,17 +4,14 @@
     "module": "NodeNext",
     "moduleResolution": "NodeNext",
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true,
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true,
     "skipLibCheck": true,
-    "types": [
-      "node"
-    ]
+    "types": ["node"]
   },
-  "include": [
-    "index.ts",
-    "lib/**/*.ts",
-    "test/**/*.ts"
-  ]
+  "include": ["index.ts", "lib/**/*.ts", "test/**/*.ts"]
 }
