@@ -1,19 +1,32 @@
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
 import { SelectList, Text, truncateToWidth } from "@earendil-works/pi-tui";
-import type { readSnapshot } from "./status.ts";
+import type { Snapshot as FullSnapshot, StatusSource } from "./status.ts";
 
-type Snapshot = Pick<Awaited<ReturnType<typeof readSnapshot>>, "text" | "details" | "busy">;
+type Snapshot = Pick<FullSnapshot, "text" | "details" | "busy"> & Partial<Pick<FullSnapshot, "indexed" | "git">>;
+
+export function indexActions(snapshot: Snapshot) {
+  return snapshot.busy || snapshot.git?.operation || ["zvec: unknown", "zvec: checking", "zvec: status expired", "zvec: unavailable"].includes(snapshot.text)
+    ? ["Refresh status", "Worktree overview", "Close"]
+    : snapshot.indexed
+      ? ["Refresh status", "Worktree overview", "Update index (incremental)", "Switch model and rebuild", "Rebuild index", "Close"]
+      : ["Refresh status", "Worktree overview", "Create index", "Close"];
+}
 
 export function createIndexMenu(snapshot: Snapshot, options: string[], theme: Theme, done: (value: string | undefined) => void) {
-  const list = new SelectList(options.map((value) => ({ value, label: value })), options.length, {
-    selectedPrefix: (text) => theme.fg("accent", text),
-    selectedText: (text) => theme.fg("accent", text),
-    description: (text) => theme.fg("muted", text),
-    scrollInfo: (text) => theme.fg("dim", text),
-    noMatch: (text) => theme.fg("warning", text),
-  });
-  list.onSelect = (item) => done(item.value);
-  list.onCancel = () => done(undefined);
+  function makeList(values: string[]) {
+    const list = new SelectList(values.map((value) => ({ value, label: value })), values.length, {
+      selectedPrefix: (text) => theme.fg("accent", text),
+      selectedText: (text) => theme.fg("accent", text),
+      description: (text) => theme.fg("muted", text),
+      scrollInfo: (text) => theme.fg("dim", text),
+      noMatch: (text) => theme.fg("warning", text),
+    });
+    list.onSelect = (item) => done(item.value);
+    list.onCancel = () => done(undefined);
+    return list;
+  }
+  let list = makeList(options);
+  let selected: string | undefined;
 
   let layout: { width: number; header: string[]; footer: string[] } | undefined;
 
@@ -61,17 +74,29 @@ export function createIndexMenu(snapshot: Snapshot, options: string[], theme: Th
         ...layout.footer,
       ];
     },
+    update(next: Snapshot, values: string[]) {
+      snapshot = next;
+      layout = undefined;
+      if (values.join("\0") !== options.join("\0")) {
+        selected ??= list.getSelectedItem()?.value;
+        options = values;
+        list = makeList(values);
+        list.setSelectedIndex(Math.max(0, values.indexOf(selected ?? "")));
+      }
+    },
     invalidate() { layout = undefined; list.invalidate(); },
-    handleInput(data: string) { list.handleInput(data); },
+    handleInput(data: string) { list.handleInput(data); selected = list.getSelectedItem()?.value; },
   };
 }
 
-export async function showIndexMenu(ctx: ExtensionContext, snapshot: Snapshot, options: string[], signal: AbortSignal) {
+export async function showIndexMenu(ctx: ExtensionContext, snapshot: Snapshot, options: string[], signal: AbortSignal, source?: StatusSource) {
   if (signal.aborted) return;
   let onAbort: (() => void) | undefined;
+  let unsubscribe: (() => void) | undefined;
   try {
     return await ctx.ui.custom<string | undefined>((tui, theme, _keys, done) => {
       const menu = createIndexMenu(snapshot, options, theme, done);
+      unsubscribe = source?.subscribe((next) => { menu.update(next, indexActions(next)); tui.requestRender(); });
       onAbort = () => done(undefined);
       signal.addEventListener("abort", onAbort, { once: true });
       if (signal.aborted) onAbort();
@@ -81,6 +106,7 @@ export async function showIndexMenu(ctx: ExtensionContext, snapshot: Snapshot, o
       };
     });
   } finally {
+    unsubscribe?.();
     if (onAbort) signal.removeEventListener("abort", onAbort);
   }
 }

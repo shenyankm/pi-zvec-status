@@ -58,6 +58,27 @@ for (const text of ["", "not json", "null", "[]"]) {
   });
 }
 
+test("a stalled session cleanup cannot publish ready after the deadline", async (t) => {
+  let cleanupStarted = false;
+  const env = await serve(t, async (req, res) => {
+    if (req.method === "DELETE") { cleanupStarted = true; return; }
+    if (req.method !== "POST") { res.writeHead(405).end(); return; }
+    let body = "";
+    for await (const chunk of req) body += chunk;
+    const message = JSON.parse(body);
+    if (message.id === undefined) { res.writeHead(202).end(); return; }
+    const result = message.method === "initialize"
+      ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
+      : { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } };
+    res.writeHead(200, { "Content-Type": "application/json", "mcp-session-id": "stall-cleanup" });
+    res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
+  });
+  const started = Date.now();
+  await assert.rejects(readStatus("/workspace", AbortSignal.timeout(200), env));
+  assert.equal(cleanupStarted, true);
+  assert.ok(Date.now() - started < 1500);
+});
+
 test("unsupported session termination does not discard a valid status result", async (t) => {
   let deletes = 0;
   const env = await serve(t, async (req, res) => {

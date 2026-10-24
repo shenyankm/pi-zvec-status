@@ -1,12 +1,14 @@
 import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
-import { mkdir, realpath } from "node:fs/promises";
+import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
 import { test, type TestContext } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import extension from "../index.ts";
-import { readGit, sameGit } from "../lib/git.ts";
+import { readGit, sameGit, readWorktrees } from "../lib/git.ts";
+import { indexActions } from "../lib/menu.ts";
+import { showWorktreeOverview } from "../lib/worktrees.ts";
 import { formatStatus } from "../lib/display.ts";
 import { readSnapshot } from "../lib/status.ts";
 import { openPanel } from "../lib/panel.ts";
@@ -21,7 +23,7 @@ async function repository(t: TestContext) {
   await mkdir(root);
   const git = async (cwd: string, ...args: string[]) => (await exec("git", [
     "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
-    "-c", "commit.gpgsign=false", "-c", `core.hooksPath=${join(home, "no-hooks")}`,
+    "-c", "commit.gpgsign=false", "-c", "core.autocrlf=false", "-c", `core.hooksPath=${join(home, "no-hooks")}`,
     "-C", cwd, ...args,
   ])).stdout.trim();
   await git(root, "init", "--initial-branch=main");
@@ -165,5 +167,93 @@ test("switching branches during confirmation prevents index submission", async (
     notify: (message: string) => notifications.push(message),
   } } as unknown as ExtensionContext, signal());
   assert.match(notifications[0], /state has changed/);
+  assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
+});
+
+test("real merge, cherry-pick and rebase conflicts are visible and disable writes", async (t) => {
+  const { root, git, signal } = await repository(t);
+  await writeFile(join(root, "conflict.txt"), "base\n");
+  await git(root, "add", "."); await git(root, "commit", "-m", "base");
+  await git(root, "checkout", "-b", "feature");
+  await writeFile(join(root, "conflict.txt"), "feature\n");
+  await git(root, "commit", "-am", "feature");
+  const featureHead = await git(root, "rev-parse", "HEAD");
+  await git(root, "checkout", "main");
+  await writeFile(join(root, "conflict.txt"), "main\n");
+  await git(root, "commit", "-am", "main");
+  for (const [command, argument, operation] of [["merge", "feature", "merge"], ["cherry-pick", featureHead, "cherry-pick"], ["rebase", "feature", "rebase"]]) {
+    await assert.rejects(git(root, command, argument));
+    const context = await readGit(root, signal());
+    assert.equal(context?.operation, operation);
+    assert.equal(context?.dirty, true);
+    assert.match(formatStatus("zvec: ready", plain, context), new RegExp(`\\[${operation}\\]`));
+    assert.doesNotMatch(indexActions({ text: "zvec: ready", details: "", indexed: true, busy: false, git: context }).join("\n"), /Rebuild index|Update index/);
+    await git(root, command, "--abort");
+    assert.equal((await readGit(root, signal()))?.operation, undefined);
+  }
+});
+
+test("submodules, nested repositories and sparse checkouts use their own Git roots", async (t) => {
+  const { home, root, git, signal } = await repository(t);
+  await mkdir(join(root, "src")); await mkdir(join(root, "excluded"));
+  await writeFile(join(root, "src", "a.txt"), "visible\n");
+  await writeFile(join(root, "excluded", "b.txt"), "sparse\n");
+  await git(root, "add", "."); await git(root, "commit", "-m", "sparse fixture");
+  await git(root, "sparse-checkout", "init", "--cone"); await git(root, "sparse-checkout", "set", "src");
+  assert.equal((await readGit(root, signal()))?.dirty, false);
+  await writeFile(join(root, "src", "a.txt"), "changed\n");
+  assert.equal((await readGit(root, signal()))?.dirty, true);
+  await git(root, "checkout", "--", "src/a.txt"); await git(root, "sparse-checkout", "disable");
+  const module = join(home, "module-source"); await mkdir(module);
+  await git(module, "init", "--initial-branch=main"); await git(module, "commit", "--allow-empty", "-m", "module");
+  await git(root, "-c", "protocol.file.allow=always", "submodule", "add", module, "modules/lib");
+  const inside = join(root, "modules", "lib");
+  assert.equal(await realpath((await readGit(inside, signal()))!.root), await realpath(inside));
+  const nested = join(root, "nested"); await mkdir(nested); await git(nested, "init", "--initial-branch=nested");
+  assert.equal((await readGit(nested, signal()))?.branch, "nested");
+});
+
+test("worktree move, missing paths, prune, recreation and bare repositories remain distinguishable", async (t) => {
+  const { home, root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  const name = process.platform === "win32" ? "tree with space" : "tree with\nnewline";
+  const original = join(home, name);
+  const moved = join(home, "moved 工作树");
+  await git(root, "worktree", "add", "-b", "linked", original);
+  assert.ok((await readWorktrees(root, signal())).some((tree) => tree.root.endsWith(name)));
+  await git(root, "worktree", "move", original, moved);
+  assert.ok((await readWorktrees(root, signal())).some((tree) => tree.root.endsWith("moved 工作树")));
+  await rm(moved, { recursive: true, force: true });
+  assert.ok((await readWorktrees(root, signal())).some((tree) => tree.prunable));
+  await git(root, "worktree", "prune");
+  await git(root, "worktree", "add", "-b", "recreated", moved);
+  assert.equal((await readGit(moved, signal()))?.branch, "recreated");
+  const bare = join(home, "bare.git"); await git(root, "clone", "--bare", root, bare);
+  assert.ok((await readWorktrees(bare, signal())).some((tree) => tree.bare));
+});
+
+test("worktree overview pages real worktrees and bounds status concurrency to four", { timeout: 30000 }, async (t) => {
+  const { home, root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  for (let index = 0; index < 22; index++) await git(root, "worktree", "add", "--detach", join(home, `tree-${index}`));
+  let active = 0; let peak = 0;
+  const { env, calls } = await mockServer(t, async (message) => {
+    active++; peak = Math.max(peak, active);
+    await new Promise((resolve) => setTimeout(resolve, 10)); active--;
+    return { result: { content: [], structuredContent: { root: message.params?.arguments?.root, indexed: false } } };
+  });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  let pages = 0;
+  const ctx = { cwd: root, ui: {
+    select: async (title: string, labels: string[]) => {
+      assert.match(title, /read-only/);
+      assert.ok(labels.some((label) => label.includes("no index")));
+      return pages++ === 0 ? "Next page" : "Close";
+    },
+    notify: () => assert.fail("overview must succeed"),
+  } } as unknown as ExtensionContext;
+  await showWorktreeOverview(ctx, AbortSignal.timeout(15000));
+  assert.equal(pages, 2); assert.ok(peak <= 4);
+  assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index_status").length, 23);
   assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
 });

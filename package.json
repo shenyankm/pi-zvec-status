@@ -37,6 +37,7 @@
     "test": "node --experimental-strip-types --test test/*.test.ts",
     "check": "tsc --noEmit && npm test",
     "benchmark": "node --experimental-strip-types test/benchmark.ts",
+    "test:environments": "node --experimental-strip-types --test test/git.test.ts test/live-status.test.ts test/protocol.test.ts && python3 test/environments/terminal-check.py",
     "coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-exclude=test/** --test-skip-pattern=\"^Pi loader smoke:\" test/*.test.ts"
   },
   "peerDependencies": {

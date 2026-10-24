@@ -13,7 +13,8 @@ When using zvec-grep for semantic code search, you may want to know whether a pr
 | Feature | Description |
 | --- | --- |
 | Footer status | Shows readiness and progress alongside the Git branch (or detached HEAD) and worktree name. Long Git labels are shortened to fit the footer. |
-| Project status panel | Shows the query directory, full worktree path, branch, Git HEAD, embedding model, index path, and file counts. |
+| Project status panel | Live updates from the same snapshot as the footer, with query/worktree paths, Git changes and operation, model, file counts, activity, and check time. |
+| Worktree overview | `/zvec worktrees` lists worktrees read-only, 20 per page, with at most four concurrent status queries and a 10-second page budget. |
 | Index management | Create an index, update it incrementally, rebuild it, or switch to another local embedding model and rebuild. |
 | Model cache detection | Distinguishes `Downloaded`, `Not downloaded`, and `Cache unknown`, with downloaded models listed first. |
 | Operation confirmation | Index writes require confirmation. Missing or unverifiable local models also require separate download consent. |
@@ -108,11 +109,13 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 
 ### Refresh and interaction
 
-- Queries once when an interactive session starts, then **30 seconds after each query completes**. The previous result remains visible while waiting for the next result; a failed refresh replaces it with `unavailable`. Use `/zvec` to request a fresh snapshot.
+- Queries at startup, then **30 seconds after completion while idle**, or **2 seconds while queued/indexing**. Outages back off from 30 to at most 120 seconds; manual/focus/resume refreshes do not wait for the retry timer.
+- Refreshing replaces the previous result with `checking`; failed or timed-out reads show `unavailable`. A wall-clock watchdog expires overdue snapshots after an event-loop pause. Terminal focus and `SIGCONT` trigger refresh; all listeners and timers are removed on session shutdown.
+- The panel and footer share the same coalesced request and update together, including while the menu is open. The `Checked` field records snapshot time. Unverified or expired frames cannot enable writes.
 - `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
 - The panel separates **Overview**, **Workspace**, and **Actions**, uses semantic status colors, dims secondary paths, aligns field labels, and wraps content in narrow terminals.
 - Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
-- Every write operation requires confirmation. Queued/running jobs or unrecognized status formats limit the menu to refresh and close. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
+- Every write operation requires confirmation. Queued/running jobs, active Git operations, expired or unrecognized snapshots limit the menu to refresh, read-only overview, and close. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
 - Index jobs run in the daemon. Closing the menu or Pi does not cancel an already accepted job.
 - Updates the footer only when its final displayed content changes.
 - Each request has a **10-second deadline**. Concurrent monitor refreshes share the same request.
@@ -132,13 +135,15 @@ In Git repositories, the footer identifies both the branch and the worktree dire
 ! zvec · detached@a1b2c3d @ app-review · stale
 ```
 
-Branch and worktree labels are each limited to 20 terminal columns; the panel retains the full branch name and worktree path plus a 12-character Git HEAD. An unborn branch keeps its name and shows `No commit available` for HEAD. Outside Git, or if Git cannot be read, index status still works and the panel shows `Git: Not available`.
+A `*` after the branch marks tracked or untracked changes. Merge, rebase, cherry-pick, revert, and bisect states are shown explicitly and disable index writes until resolved. Branch and worktree labels are each limited to 20 terminal columns; the panel retains the full branch name and worktree path plus a 12-character Git HEAD. An unborn branch keeps its name and shows `No commit available` for HEAD. Outside Git, or if Git cannot be read, index status still works and the panel shows `Git: Not available`.
 
 Each linked worktree is queried using its own Pi working directory, not the shared Git common directory or the branch name. Two worktrees at the same commit remain distinct. Starting from a subdirectory still queries that subdirectory; the panel's `Project` path is the query directory, while `Worktree` is its Git top-level directory. The extension never silently changes the query root to the Git root.
 
-Git context is read before and after each panel/footer status query with bounded, read-only Git commands, not from the terminal rendering path. No working-tree file scan or `git status` is performed. A branch/HEAD change during a query suppresses readiness (`unknown`) and asks for a refresh. Changes during an operation confirmation invalidate that confirmation. A later refresh displays the new context; no branch switch triggers an automatic index update or rebuild.
+Git context is read before and after each shared status query using bounded, read-only Git commands, including porcelain-v2 status with untracked-file detection. These commands never run in the rendering path or take optional Git write locks; very large/slow status output safely degrades to `Git: Not available`. A branch/HEAD change during a query suppresses readiness (`unknown`) and asks for a refresh. Changes during an operation confirmation invalidate that confirmation. A later refresh displays the new context; no branch switch triggers an automatic index update or rebuild.
 
-**Git HEAD describes the checkout, not the commit stored in the index.** The daemon's snapshot remains the source of index readiness. Changes are detected on refresh, not through an instantaneous Git event subscription; a stable new branch plus a ready daemon response does not prove every file in that branch has been indexed.
+`/zvec worktrees` never changes Pi's working directory or submits index jobs. Missing/prunable and bare worktrees are distinguished; rows not reached before the page deadline remain `not checked`, while timed-out reads show `unavailable`, never ready. New, moved, or removed worktrees are re-listed on refresh.
+
+**Git HEAD describes the checkout, not the commit stored in the index.** The panel labels index HEAD as `Not attested by daemon`. Git metadata checks do not prove that an already-dirty file's bytes stayed unchanged throughout a query. The daemon's snapshot remains the source of index readiness. Changes are detected on refresh, not through an instantaneous Git event subscription; a stable new branch plus a ready daemon response does not prove every file in that branch has been indexed.
 
 ### Connection and authentication
 
@@ -174,7 +179,7 @@ A submission timeout does not mean the daemon rejected the job. Refresh status b
 
 Even background status queries are not necessarily side-effect-free on the server: they may scan local files or activate a workspace runtime or file watcher. Polling costs for large workspaces or multiple Pi sessions depend on zvec-grep's implementation.
 
-Status comes from the server's existing snapshot; the extension does not perform an additional workspace scan or validate search quality. Ready requires `indexed: true` and either an explicit ready state or complete stored/pending/failed file counters with no pending or failed files. Index existence or a successful historical job alone is insufficient. Unknown compatibility states and incomplete revision pairs are not shown as ready; an older daemon returning insufficient evidence now shows `unknown`. Progress is only displayed when the server provides overall completion, never by treating a single phase's count as overall progress.
+Status comes from the server's existing snapshot; the extension does not perform an additional workspace scan or validate search quality. Ready requires `indexed: true` and either an explicit ready state or complete stored/pending/failed file counters with no pending or failed files. Index existence or a successful historical job alone is insufficient. Reported additions, modifications, or deletions force `stale` even when the last job succeeded and revisions match; the panel's `Index drift` row uses `+added ~modified -deleted`. Unknown compatibility states and incomplete revision pairs are not shown as ready; an older daemon returning insufficient evidence now shows `unknown`. Progress is only displayed when the server provides overall completion, never by treating a single phase's count as overall progress.
 
 ## Development and verification
 
@@ -192,7 +197,7 @@ Source and tests use TypeScript with strict type checking. Pi loads `index.ts` d
 
 The official MCP SDK is loaded on the first query, not in non-TUI modes. The custom menu loads only when opened and uses Pi's native pi-tui components without another UI framework. TypeScript, Node types, and the Pi/pi-tui packages used for development are `devDependencies`. Pi and pi-tui are also declared as host `peerDependencies` with `"*"` ranges and are not bundled, following the [official Pi package guidelines](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#declare-dependencies). Development dependency versions remain constrained for type checking and CI; wildcard host peers do not imply compatibility with every Pi release.
 
-Tests also create temporary Git repositories and linked worktrees to cover branch changes, detached HEAD, unborn branches, subdirectories, Git environment overrides, unavailable Git, query-time branch changes, and confirmation invalidation.
+Tests also create real temporary Git repositories for branch/operation changes, submodules, nested repositories, sparse checkouts, moved/missing/recreated worktrees, bare repositories, paginated request concurrency, detached HEAD, and confirmation invalidation. For native-daemon load, process-kill, and actual Pi PTY results, see [environment verification](docs/environment-verification.md).
 
 Tests cover state mapping, real HTTP MCP protocol exchanges with local mock servers, authentication, read-only calls, connection cleanup, refresh coalescing, footer deduplication and theme changes, menus, confirmations and cancellations, submission arguments, error recovery, and non-interactive modes.
 

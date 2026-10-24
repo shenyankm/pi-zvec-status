@@ -1,22 +1,22 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { indexWorkspace, readSnapshot } from "./status.ts";
+import { indexWorkspace, readSnapshot, type StatusSource } from "./status.ts";
 import { confirmModelDownload, localModelChoices } from "./models.ts";
 import { sameGit } from "./git.ts";
+import { showWorktreeOverview } from "./worktrees.ts";
 
-export async function openPanel(ctx: ExtensionContext, signal: AbortSignal) {
+export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, source?: StatusSource) {
   const deadline = () => AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
+  const read = () => source ? source.read() : readSnapshot(ctx.cwd, deadline());
   try {
     while (!signal.aborted) {
-      const snapshot = await readSnapshot(ctx.cwd, deadline());
-      const options = snapshot.busy || snapshot.text === "zvec: unknown"
-        ? ["Refresh status", "Close"]
-        : snapshot.indexed
-          ? ["Refresh status", "Update index (incremental)", "Switch model and rebuild", "Rebuild index", "Close"]
-          : ["Refresh status", "Create index", "Close"];
-      const { showIndexMenu } = await import("./menu.ts");
-      const action = await showIndexMenu(ctx, snapshot, options, signal);
+      let snapshot = await read();
+      const { showIndexMenu, indexActions } = await import("./menu.ts");
+      const action = await showIndexMenu(ctx, snapshot, indexActions(snapshot), signal, source);
       if (!action || action === "Close" || signal.aborted) return;
       if (action === "Refresh status") continue;
+      if (action === "Worktree overview") { await showWorktreeOverview(ctx, signal); continue; }
+      if (source) snapshot = await read();
+      if (!indexActions(snapshot).includes(action)) continue;
       let embedding: string | undefined;
       let choices: Awaited<ReturnType<typeof localModelChoices>> | undefined;
       if (action === "Create index" || action === "Switch model and rebuild") {
@@ -52,7 +52,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal) {
       ].join("\n"), { signal });
       if (!confirmed || signal.aborted) continue;
       // Another client may have started a job while the confirmation was open.
-      const latest = await readSnapshot(ctx.cwd, deadline());
+      const latest = await read();
       if (latest.busy || latest.text === "zvec: unknown" || latest.model !== snapshot.model || latest.indexed !== snapshot.indexed ||
           !sameGit(snapshot.git, latest.git)) {
         ctx.ui.notify("Index or Git state has changed. Refresh and select the operation again.", "warning");

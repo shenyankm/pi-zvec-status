@@ -70,6 +70,18 @@ for (const [name, patch, expected] of [
   test(name, () => assert.equal(describeStatus({ ...base, ...patch }), `zvec: ${expected}`));
 }
 
+for (const field of ["added", "modified", "deleted"]) {
+  test(`${field} files override historical success and equal revisions`, () => {
+    const data = { ...base, status: undefined, runtime: { job_state: "succeeded", dirty_revision: 2, indexed_revision: 2 },
+      persistent: { files: { stored: 42, pending: 0, failed: 0, [field]: 1 } } };
+    assert.equal(describeStatus(data), "zvec: stale");
+    assert.equal(describeStatus({ ...data, persistent: { files: { ...data.persistent.files, [field]: 0 } } }), "zvec: ready · 42 files");
+  });
+  test(`invalid ${field} count cannot enable ready`, () => {
+    assert.equal(describeStatus({ ...base, persistent: { files: { [field]: "2" } } }), "zvec: unknown");
+  });
+}
+
 test("rejects invalid envelopes without rendering server text", () => {
   for (const data of [null, [], {}, { indexed: true }, { ...base, runtime: [] }]) {
     assert.throws(() => describeStatus(data), /Unsupported/);
@@ -138,7 +150,7 @@ test("a stalled HTTP initialization is cancelled at the deadline", async (t) => 
   }));
 });
 
-test("single zvec command opens the panel and skips unchanged footer output", async (t) => {
+test("single zvec command shares snapshots and reports refresh phases", async (t) => {
   const response = { ...base, persistent: { files: { stored: 1 } } };
   const { env } = await mockServer(t, { result: { content: [], structuredContent: response } });
   const names = ["ZVEC_GREP_SERVER_URL", "ZVEC_GREP_SERVER_TOKEN", "ZVEC_GREP_SERVER_TOKEN_FILE"];
@@ -169,12 +181,14 @@ test("single zvec command opens the panel and skips unchanged footer output", as
   await handlers.get("session_start")({}, ctx);
   assert.deepEqual([...commands.keys()], ["zvec"]);
   await commands.get("zvec").handler("", ctx);
-  assert.deepEqual(statuses, [["zvec-status", "◌ zvec · checking"], ["zvec-status", "● zvec · ready (last check)"]]);
+  assert.deepEqual(statuses.slice(0, 2), [["zvec-status", "◌ zvec · checking"], ["zvec-status", "● zvec · ready (last check)"]]);
+  assert.equal(statuses.at(-1)![1], "● zvec · ready (last check)");
   assert.match(panels[0], /Project:\s+\/workspace/);
   await commands.get("zvec").handler("", ctx);
   response.persistent.files.stored = 2;
   await commands.get("zvec").handler("", ctx);
-  assert.equal(statuses.length, 2);
+  assert.equal(statuses.at(-1)![1], "● zvec · ready (last check)");
+  for (let index = 1; index < statuses.length; index++) assert.notEqual(statuses[index][1], statuses[index - 1][1], "identical footer frames remain deduplicated");
   assert.match(panels.at(-1)!, /ready · 2 files/);
   assert.deepEqual(notifications, []);
   ctx.ui.theme.fg = (_color, text) => `[${text}]`;
@@ -191,6 +205,28 @@ test("aborted requests do not connect", async (t) => {
   const { env, calls } = await mockServer(t, { result: { content: [], structuredContent: base } });
   await assert.rejects(readStatus("/workspace", AbortSignal.abort(), env), { name: "AbortError" });
   assert.equal(calls.length, 0);
+});
+
+test("completed legacy jobs still show stale and drift for unprocessed deletions", async (t) => {
+  const { env } = await mockServer(t, { result: { content: [], structuredContent: {
+    ...base, status: undefined, runtime: { job_state: "succeeded", dirty_revision: 2, indexed_revision: 2 },
+    persistent: { files: { stored: 1545, pending: 0, failed: 0, added: 0, modified: 0, deleted: 2 } },
+  } } });
+  const snapshot = await readSnapshot("/workspace", AbortSignal.timeout(2000), env);
+  assert.equal(snapshot.text, "zvec: stale");
+  assert.match(snapshot.details, /Index drift: \+0 ~0 -2/);
+});
+
+test("running snapshots explain file-level progress and expose sanitized activity", async (t) => {
+  const { env } = await mockServer(t, { result: { content: [], structuredContent: {
+    ...base, runtime: { job_state: "running", completion: { completed: 1444, total: 1543 },
+      progress: { detail: "embedding generated/THIRD-PARTY.txt\x1b[2J\n" } },
+  } } });
+  const snapshot = await readSnapshot("/workspace", AbortSignal.timeout(2000), env);
+  assert.equal(snapshot.text, "zvec: indexing 1444/1543");
+  assert.match(snapshot.details, /Activity: embedding generated\/THIRD-PARTY.txt/);
+  assert.match(snapshot.details, /Overall files, not embedding chunks/);
+  assert.ok(!snapshot.details.includes("\x1b"));
 });
 
 test("snapshot includes model and file counts without terminal control characters", async (t) => {
@@ -341,6 +377,7 @@ for (const scenario of [
     if (config.cacheRemoved) assert.match(notifications[0], /cache has changed/);
     if (config.missingModel) assert.match(notifications[0], /Cannot determine the embedding model/);
     if (config.submissionTimeout) {
+      t.mock.restoreAll();
       assert.equal(await readStatus("/workspace", new AbortController().signal, env), "zvec: indexing");
       assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
     }

@@ -27,6 +27,7 @@ async function requestTool(
   signal: AbortSignal,
   env: NodeJS.ProcessEnv = process.env,
 ): Promise<unknown> {
+  signal = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
   signal.throwIfAborted();
   const url = serverUrl(env.ZVEC_GREP_SERVER_URL);
   const token = env.ZVEC_GREP_SERVER_TOKEN ||
@@ -53,6 +54,7 @@ async function requestTool(
   // Request cancellation alone does not necessarily stop an HTTP fetch.
   const close = () => { void client.close().catch(() => {}); };
   signal.addEventListener("abort", close, { once: true });
+  let data: unknown;
   try {
     await client.connect(transport, { signal, timeout: 10_000 });
     const result = await client.callTool({
@@ -61,7 +63,7 @@ async function requestTool(
     if (result.isError) {
       throw new Error("Index status rejected or action rejected; check --mcp-toolset full.");
     }
-    const data = result.structuredContent ?? JSON.parse(
+    data = result.structuredContent ?? JSON.parse(
       (Array.isArray(result.content) ? result.content : [])
         .filter((item: unknown): item is { type: "text"; text: string } =>
           object(item) && item.type === "text" && typeof item.text === "string")
@@ -75,7 +77,6 @@ async function requestTool(
       signal.throwIfAborted();
       if (relative(requested, returned) !== "") throw new Error("Index status belongs to a different workspace.");
     }
-    return data;
   } catch (error) {
     if (object(error) && error.code === -32601) {
       throw new Error("Status tool unavailable; start zg with --mcp-toolset full.");
@@ -91,6 +92,8 @@ async function requestTool(
       await client.close();
     }
   }
+  signal.throwIfAborted();
+  return data;
 }
 
 export async function readStatus(root: string, signal: AbortSignal, env: NodeJS.ProcessEnv = process.env) {
@@ -109,12 +112,14 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
   const embedding = object(workspace?.embedding) ? workspace.embedding : undefined;
   const files = object(persistent?.files) ? persistent.files : undefined;
   const runtime = object(data.runtime) ? data.runtime : undefined;
+  const progress = object(runtime?.progress) ? runtime.progress : undefined;
   const clean = (value: string) => value.replace(/[\x00-\x1f\x7f-\x9f]/g, "");
   const model = typeof embedding?.provider === "string" && typeof embedding.model === "string"
     ? clean(`${embedding.provider}/${embedding.model}`) : undefined;
   return {
     text,
     git,
+    checkedAt: Date.now(),
     indexed: data.indexed === true,
     busy: runtime?.job_state === "running" || runtime?.job_state === "queued",
     model,
@@ -124,14 +129,27 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
       `Model: ${model ?? "Unknown / not configured"}`,
       `Files: ${count(files?.stored) ? files.stored : "?"} · Pending: ${count(files?.pending) ? files.pending : "?"} · Failed: ${count(files?.failed) ? files.failed : "?"}`,
       `Index path: ${typeof persistent?.index_path === "string" ? clean(persistent.index_path) : "None"}`,
+      ...([files?.added, files?.modified, files?.deleted].some((value) => value !== undefined)
+        ? [`Index drift: +${count(files?.added) ? files.added : "?"} ~${count(files?.modified) ? files.modified : "?"} -${count(files?.deleted) ? files.deleted : "?"}`] : []),
       ...(git ? [
         `Branch: ${git.branch ? clean(git.branch) : "detached HEAD"}`,
         `HEAD: ${git.head?.slice(0, 12) ?? "No commit available"}`,
         `Worktree: ${clean(git.root)}`,
+        `Changes: ${git.dirty ? "Uncommitted / untracked" : "Clean"}`,
+        `Operation: ${git.operation ?? "None"}`,
+        "Index HEAD: Not attested by daemon",
       ] : ["Git: Not available"]),
+      ...(typeof progress?.detail === "string" ? [`Activity: ${clean(progress.detail)}`] : []),
+      ...(runtime?.job_state === "running" ? ["Progress: Overall files, not embedding chunks"] : []),
       ...(changed ? ["Git state: Changed during query; refresh status"] : []),
     ].join("\n"),
   };
+}
+
+export type Snapshot = Awaited<ReturnType<typeof readSnapshot>>;
+export interface StatusSource {
+  read: () => Promise<Snapshot>;
+  subscribe: (listener: (snapshot: Snapshot) => void) => () => void;
 }
 
 export async function indexWorkspace(
@@ -175,7 +193,8 @@ export function describeStatus(data: unknown) {
       (data.status !== undefined && typeof data.status !== "string") ||
       (data.index_policy !== undefined && (typeof data.index_policy !== "string" ||
         !["enabled", "disabled", "undecided"].includes(data.index_policy))) ||
-      [files?.stored, files?.pending, files?.failed, runtime?.dirty_revision, runtime?.indexed_revision]
+      [files?.stored, files?.pending, files?.failed, files?.added, files?.modified, files?.deleted,
+       runtime?.dirty_revision, runtime?.indexed_revision]
         .some((value) => value !== undefined && !count(value))) {
     return "zvec: unknown";
   }
@@ -200,7 +219,8 @@ export function describeStatus(data: unknown) {
   }
   if (job === "cancelled") return "zvec: cancelled";
   if (!data.indexed) return "zvec: no index";
-  if (state === "stale" || (count(files?.pending) && files.pending > 0) ||
+  if (state === "stale" || [files?.pending, files?.added, files?.modified, files?.deleted]
+      .some((value) => count(value) && value > 0) ||
       (count(runtime?.dirty_revision) && count(runtime?.indexed_revision) &&
        runtime.dirty_revision > runtime.indexed_revision)) {
     return "zvec: stale";
