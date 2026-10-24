@@ -1,4 +1,15 @@
-import { readFile } from "node:fs/promises";
+import { readFile, realpath } from "node:fs/promises";
+import { isAbsolute, relative, resolve } from "node:path";
+import { readGit, sameGit } from "./git.ts";
+
+async function canonicalRoot(root: string) {
+  try {
+    return await realpath(root);
+  } catch (error) {
+    if (object(error) && (error.code === "ENOENT" || error.code === "ENOTDIR")) return resolve(root);
+    throw error;
+  }
+}
 
 export function serverUrl(value = "http://127.0.0.1:7999/mcp") {
   const url = new URL(value);
@@ -56,6 +67,14 @@ async function requestTool(
           object(item) && item.type === "text" && typeof item.text === "string")
         .map((item) => item.text).join("\n"),
     );
+    if (name === "zvec_grep_index_status") {
+      if (!object(data) || typeof data.root !== "string" || !isAbsolute(data.root) || typeof args.root !== "string") {
+        throw new Error("Unsupported index status root.");
+      }
+      const [requested, returned] = await Promise.all([canonicalRoot(args.root), canonicalRoot(data.root)]);
+      signal.throwIfAborted();
+      if (relative(requested, returned) !== "") throw new Error("Index status belongs to a different workspace.");
+    }
     return data;
   } catch (error) {
     if (object(error) && error.code === -32601) {
@@ -79,8 +98,11 @@ export async function readStatus(root: string, signal: AbortSignal, env: NodeJS.
 }
 
 export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJS.ProcessEnv = process.env) {
+  const before = await readGit(root, signal);
   const data = await requestTool("zvec_grep_index_status", { root }, signal, env);
-  const text = describeStatus(data);
+  const git = await readGit(root, signal);
+  const changed = !sameGit(before, git);
+  const text = changed ? "zvec: unknown" : describeStatus(data);
   if (!object(data)) throw new Error("Unsupported index status response.");
   const persistent = object(data.persistent) ? data.persistent : undefined;
   const workspace = object(persistent?.workspace_index) ? persistent.workspace_index : undefined;
@@ -92,6 +114,7 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
     ? clean(`${embedding.provider}/${embedding.model}`) : undefined;
   return {
     text,
+    git,
     indexed: data.indexed === true,
     busy: runtime?.job_state === "running" || runtime?.job_state === "queued",
     model,
@@ -101,6 +124,12 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
       `Model: ${model ?? "Unknown / not configured"}`,
       `Files: ${count(files?.stored) ? files.stored : "?"} · Pending: ${count(files?.pending) ? files.pending : "?"} · Failed: ${count(files?.failed) ? files.failed : "?"}`,
       `Index path: ${typeof persistent?.index_path === "string" ? clean(persistent.index_path) : "None"}`,
+      ...(git ? [
+        `Branch: ${git.branch ? clean(git.branch) : "detached HEAD"}`,
+        `HEAD: ${git.head?.slice(0, 12) ?? "No commit available"}`,
+        `Worktree: ${clean(git.root)}`,
+      ] : ["Git: Not available"]),
+      ...(changed ? ["Git state: Changed during query; refresh status"] : []),
     ].join("\n"),
   };
 }
@@ -141,7 +170,8 @@ export function describeStatus(data: unknown) {
   if ([runtime?.index_status, runtime?.completion, data.persistent?.files, data.compatibility]
       .some((value) => value !== undefined && !object(value)) ||
       (indexStatus !== undefined && typeof indexStatus.status !== "string") ||
-      (compatibility !== undefined && typeof compatibility.status !== "string") ||
+      (compatibility !== undefined && (typeof compatibility.status !== "string" ||
+        !["compatible", "rebuild_required"].includes(compatibility.status))) ||
       (data.status !== undefined && typeof data.status !== "string") ||
       (data.index_policy !== undefined && (typeof data.index_policy !== "string" ||
         !["enabled", "disabled", "undecided"].includes(data.index_policy))) ||
@@ -175,6 +205,10 @@ export function describeStatus(data: unknown) {
        runtime.dirty_revision > runtime.indexed_revision)) {
     return "zvec: stale";
   }
-  if (state !== undefined && state !== "ready") return "zvec: unknown";
+  if ((runtime?.dirty_revision !== undefined) !== (runtime?.indexed_revision !== undefined) ||
+      (state !== undefined && state !== "ready") ||
+      (state !== "ready" && !(count(files?.stored) && count(files?.pending) && count(files?.failed)))) {
+    return "zvec: unknown";
+  }
   return count(files?.stored) ? `zvec: ready · ${files.stored} files` : "zvec: ready";
 }

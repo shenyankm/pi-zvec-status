@@ -21,7 +21,7 @@ function harness() {
 }
 
 const snapshot = {
-  root: "/workspace", indexed: true,
+  root: "/workspace", indexed: true, status: "ready",
   persistent: { workspace_index: { embedding: { provider: "local", model: "qwen3-embedding-0.6b" } } },
 };
 const plainUI = { theme: { fg: (_color: string, text: string) => text }, setStatus() {}, notify() {} };

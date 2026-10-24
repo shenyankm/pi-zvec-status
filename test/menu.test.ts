@@ -13,6 +13,9 @@ const snapshot = {
     "Model: local/qwen3-embedding-0.6b",
     "Files: 11 · Pending: 0 · Failed: 0",
     `Index path: /workspace/${"nested/".repeat(20)}index.zvec`,
+    "Branch: feature/login",
+    "HEAD: 123456789abc",
+    `Worktree: /workspace/${"工作树".repeat(30)}`,
   ].join("\n"),
 };
 const options = ["Refresh status", "Rebuild index", "Close"];
@@ -27,6 +30,9 @@ test("menu separates status, workspace details, and actions without overflowing"
   assert.ok(output.indexOf("Overview") < output.indexOf("Workspace"));
   assert.ok(output.indexOf("Workspace") < output.indexOf("Actions"));
   assert.match(output, /Model: {6}local\/qwen3-embedding-0.6b/);
+  assert.match(output, /Branch: *feature\/login/);
+  assert.match(output, /HEAD: *123456789abc/);
+  assert.match(output, /Worktree:/);
   for (const width of [0, 1, 2, 12, 40, 80, 120]) {
     for (const line of menu.render(width)) assert.ok(visibleWidth(line) <= width, `overflow at width ${width}`);
   }

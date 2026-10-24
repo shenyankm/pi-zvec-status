@@ -26,7 +26,12 @@ Run the following manual checks before release. Use a disposable workspace, not 
 - [ ] Choose a not-downloaded model and reject `Download model?`: no job is submitted.
 - [ ] Accept the download prompt but reject the index operation: no job is submitted.
 - [ ] If you intentionally want to test downloading, accept both prompts in this disposable workspace. Otherwise choose an already downloaded model and confirm index creation.
-- [ ] A submitted job appears as queued/indexing, then ready; closing Pi does not cancel an accepted daemon job.
+- [ ] A submitted job appears as queued/indexing, then `ready (last check)` in the footer; closing Pi does not cancel an accepted daemon job.
+- [ ] Between polls and while a refresh is pending, ready remains labeled `(last check)`. Opening `/zvec` reads a fresh snapshot; closing the menu refreshes the footer.
+- [ ] Start Pi through a symlink (or a Windows junction) to the disposable workspace. A canonical response root is accepted; a response for a different workspace must never enable actions.
+- [ ] In a disposable Git repo and a linked worktree, the footers show their own branch/worktree names; panels show full worktree/query paths and the checkout's Git HEAD. Index operations still target the query directory, never the shared Git directory.
+- [ ] Test an unborn branch, detached HEAD, a subdirectory, long CJK branch/worktree names, and a non-Git directory. Status must remain usable, and long names must wrap in the panel.
+- [ ] Switch branch or commit during a status query: the result must not be labeled ready for the new context. Switch during an operation confirmation: submission must be blocked and require a new selection.
 - [ ] Change the source file, then test incremental update, rebuild, and (optionally) model switching. Confirm each write operation explicitly.
 - [ ] If a local model cache becomes missing, updating/rebuilding with the existing model requires separate download consent too. Do not delete your real model cache just for this test; use a disposable daemon/cache if testing this case live.
 - [ ] Open a menu or confirmation dialog, then switch session or reload. The old dialog must not submit an operation; the new session must remain usable.

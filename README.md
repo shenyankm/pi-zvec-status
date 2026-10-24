@@ -12,8 +12,8 @@ When using zvec-grep for semantic code search, you may want to know whether a pr
 
 | Feature | Description |
 | --- | --- |
-| Footer status | Shows `ready`, `indexing`, `no index`, `stale`, `failed`, and other states. Displays completed/total counts when the server provides overall progress. |
-| Project status panel | Shows the current directory, embedding model, index path, and stored, pending, and failed file counts. |
+| Footer status | Shows readiness and progress alongside the Git branch (or detached HEAD) and worktree name. Long Git labels are shortened to fit the footer. |
+| Project status panel | Shows the query directory, full worktree path, branch, Git HEAD, embedding model, index path, and file counts. |
 | Index management | Create an index, update it incrementally, rebuild it, or switch to another local embedding model and rebuild. |
 | Model cache detection | Distinguishes `Downloaded`, `Not downloaded`, and `Cache unknown`, with downloaded models listed first. |
 | Operation confirmation | Index writes require confirmation. Missing or unverifiable local models also require separate download consent. |
@@ -25,7 +25,7 @@ When using zvec-grep for semantic code search, you may want to know whether a pr
 After installation and connection to the zvec-grep service:
 
 1. Start Pi from the project directory whose index you want to manage.
-2. Check the footer, for example `● zvec · ready` or `○ zvec · no index`.
+2. Check the footer, for example `● zvec · ready (last check)` or `○ zvec · no index`.
 3. Enter `/zvec` to open the **Overview**, **Workspace**, and **Actions** panel.
 4. Select refresh, create, update, or rebuild. Choose **Switch model and rebuild** to change the embedding model.
 5. Review the confirmation prompts before submitting an operation. Jobs run in the background; the footer refreshes periodically. You can also select **Refresh status** in the panel.
@@ -78,14 +78,14 @@ The `full` toolset exposes index management tools as well as status queries. The
 Example footer states:
 
 ```text
-● zvec · ready
+● zvec · ready (last check)
 ◌ zvec · indexing 40/128
 ! zvec · stale
 ○ zvec · no index
 ! zvec · unavailable
 ```
 
-Icons and state descriptions use semantic colors from Pi's active theme: green for ready, accent for checking and indexing, warning for warnings, and error for failures. The name uses a muted color. Every state includes an English description after the name; ready is shown as `ready` without file counts. The panel retains the full status text.
+Icons and state descriptions use semantic colors from Pi's active theme: green for ready, accent for checking and indexing, warning for warnings, and error for failures. The name uses a muted color. Every state includes an English description after the name; ready is shown as `ready (last check)` without file counts. This is the last successful snapshot, not a live guarantee. The panel retains the full status text.
 
 The server reports running create, update, and rebuild jobs as `indexing`. Overall completed/total counts are shown when available.
 
@@ -93,7 +93,7 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 
 | State | Meaning |
 | --- | --- |
-| `ready` | The index is ready. |
+| `ready (last check)` | The most recent snapshot reported the index ready. It may have changed since that check. |
 | `checking` | Querying index status. |
 | `queued` | An index job is queued. |
 | `indexing` | Creating, updating, or rebuilding the index; may include overall progress. |
@@ -108,7 +108,7 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 
 ### Refresh and interaction
 
-- Queries once when an interactive session starts, then **30 seconds after each query completes**.
+- Queries once when an interactive session starts, then **30 seconds after each query completes**. The previous result remains visible while waiting for the next result; a failed refresh replaces it with `unavailable`. Use `/zvec` to request a fresh snapshot.
 - `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
 - The panel separates **Overview**, **Workspace**, and **Actions**, uses semantic status colors, dims secondary paths, aligns field labels, and wraps content in narrow terminals.
 - Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
@@ -120,7 +120,25 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 - Does not start background queries in print, JSON, RPC, or other non-TUI modes.
 - Uses `ctx.ui.setStatus()` without replacing Pi's default footer. Third-party custom footers must display extension status themselves.
 
-The query root is exactly Pi's `ctx.cwd`. The extension does not search parent directories for a Git repository or index. Starting Pi from a subdirectory queries that subdirectory's status.
+The query root is exactly Pi's `ctx.cwd`. The extension verifies that the response belongs to that root, resolving existing symlinks/junctions and normalizing paths using the host OS. A different or invalid response root is rejected before showing status or allowing actions. The extension does not search parent directories for a Git repository or index. Starting Pi from a subdirectory queries that subdirectory's status.
+
+### Git branches and worktrees
+
+In Git repositories, the footer identifies both the branch and the worktree directory:
+
+```text
+● zvec · main @ app · ready (last check)
+◌ zvec · feature/login @ app-login · indexing 4/25
+! zvec · detached@a1b2c3d @ app-review · stale
+```
+
+Branch and worktree labels are each limited to 20 terminal columns; the panel retains the full branch name and worktree path plus a 12-character Git HEAD. An unborn branch keeps its name and shows `No commit available` for HEAD. Outside Git, or if Git cannot be read, index status still works and the panel shows `Git: Not available`.
+
+Each linked worktree is queried using its own Pi working directory, not the shared Git common directory or the branch name. Two worktrees at the same commit remain distinct. Starting from a subdirectory still queries that subdirectory; the panel's `Project` path is the query directory, while `Worktree` is its Git top-level directory. The extension never silently changes the query root to the Git root.
+
+Git context is read before and after each panel/footer status query with bounded, read-only Git commands, not from the terminal rendering path. No working-tree file scan or `git status` is performed. A branch/HEAD change during a query suppresses readiness (`unknown`) and asks for a refresh. Changes during an operation confirmation invalidate that confirmation. A later refresh displays the new context; no branch switch triggers an automatic index update or rebuild.
+
+**Git HEAD describes the checkout, not the commit stored in the index.** The daemon's snapshot remains the source of index readiness. Changes are detected on refresh, not through an instantaneous Git event subscription; a stable new branch plus a ready daemon response does not prove every file in that branch has been indexed.
 
 ### Connection and authentication
 
@@ -156,7 +174,7 @@ A submission timeout does not mean the daemon rejected the job. Refresh status b
 
 Even background status queries are not necessarily side-effect-free on the server: they may scan local files or activate a workspace runtime or file watcher. Polling costs for large workspaces or multiple Pi sessions depend on zvec-grep's implementation.
 
-Status comes from the server's existing snapshot; the extension does not perform an additional workspace scan or validation. Progress is only displayed when the server provides overall completion, never by treating a single phase's count as overall progress. Unknown or incompatible responses are not shown as ready.
+Status comes from the server's existing snapshot; the extension does not perform an additional workspace scan or validate search quality. Ready requires `indexed: true` and either an explicit ready state or complete stored/pending/failed file counters with no pending or failed files. Index existence or a successful historical job alone is insufficient. Unknown compatibility states and incomplete revision pairs are not shown as ready; an older daemon returning insufficient evidence now shows `unknown`. Progress is only displayed when the server provides overall completion, never by treating a single phase's count as overall progress.
 
 ## Development and verification
 
@@ -173,6 +191,8 @@ For the reproducible menu-rendering benchmark, before/after measurements, and ac
 Source and tests use TypeScript with strict type checking. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs type checking before the tests.
 
 The official MCP SDK is loaded on the first query, not in non-TUI modes. The custom menu loads only when opened and uses Pi's native pi-tui components without another UI framework. TypeScript, Node types, and the Pi/pi-tui packages used for development are `devDependencies`. Pi and pi-tui are also declared as host `peerDependencies` with `"*"` ranges and are not bundled, following the [official Pi package guidelines](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#declare-dependencies). Development dependency versions remain constrained for type checking and CI; wildcard host peers do not imply compatibility with every Pi release.
+
+Tests also create temporary Git repositories and linked worktrees to cover branch changes, detached HEAD, unborn branches, subdirectories, Git environment overrides, unavailable Git, query-time branch changes, and confirmation invalidation.
 
 Tests cover state mapping, real HTTP MCP protocol exchanges with local mock servers, authentication, read-only calls, connection cleanup, refresh coalescing, footer deduplication and theme changes, menus, confirmations and cancellations, submission arguments, error recovery, and non-interactive modes.
 

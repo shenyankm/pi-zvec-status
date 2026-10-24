@@ -1,6 +1,7 @@
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { indexWorkspace, readSnapshot } from "./status.ts";
 import { confirmModelDownload, localModelChoices } from "./models.ts";
+import { sameGit } from "./git.ts";
 
 export async function openPanel(ctx: ExtensionContext, signal: AbortSignal) {
   const deadline = () => AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
@@ -52,8 +53,9 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal) {
       if (!confirmed || signal.aborted) continue;
       // Another client may have started a job while the confirmation was open.
       const latest = await readSnapshot(ctx.cwd, deadline());
-      if (latest.busy || latest.text === "zvec: unknown" || latest.model !== snapshot.model || latest.indexed !== snapshot.indexed) {
-        ctx.ui.notify("Index state has changed. Refresh and select the operation again.", "warning");
+      if (latest.busy || latest.text === "zvec: unknown" || latest.model !== snapshot.model || latest.indexed !== snapshot.indexed ||
+          !sameGit(snapshot.git, latest.git)) {
+        ctx.ui.notify("Index or Git state has changed. Refresh and select the operation again.", "warning");
         continue;
       }
       if (model.startsWith("local/") && !downloadAllowed) {

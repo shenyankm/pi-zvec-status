@@ -1,0 +1,169 @@
+import assert from "node:assert/strict";
+import { execFile } from "node:child_process";
+import { mkdir, realpath } from "node:fs/promises";
+import { basename, join } from "node:path";
+import { promisify } from "node:util";
+import { test, type TestContext } from "node:test";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import extension from "../index.ts";
+import { readGit, sameGit } from "../lib/git.ts";
+import { formatStatus } from "../lib/display.ts";
+import { readSnapshot } from "../lib/status.ts";
+import { openPanel } from "../lib/panel.ts";
+import { cacheFixture, mockServer, setEnv } from "./helpers.ts";
+
+const exec = promisify(execFile);
+const plain = { fg: (_color: string, text: string) => text };
+
+async function repository(t: TestContext) {
+  const { home } = await cacheFixture(t);
+  const root = join(home, "main-tree");
+  await mkdir(root);
+  const git = async (cwd: string, ...args: string[]) => (await exec("git", [
+    "-c", "user.name=Test", "-c", "user.email=test@example.invalid",
+    "-c", "commit.gpgsign=false", "-c", `core.hooksPath=${join(home, "no-hooks")}`,
+    "-C", cwd, ...args,
+  ])).stdout.trim();
+  await git(root, "init", "--initial-branch=main");
+  return { home, root, git, signal: () => AbortSignal.timeout(5000) };
+}
+
+test("unborn branches and subdirectories retain the worktree root", async (t) => {
+  const { root, git, signal } = await repository(t);
+  const sub = join(root, "src");
+  await mkdir(sub);
+  const unborn = await readGit(sub, signal());
+  assert.equal(unborn?.branch, "main");
+  assert.equal(unborn?.head, undefined);
+  assert.equal(await realpath(unborn!.root), await realpath(root));
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  const committed = await readGit(sub, signal());
+  assert.equal(committed?.branch, "main");
+  assert.match(committed!.head!, /^[a-f0-9]{40,64}$/);
+  assert.equal(sameGit(unborn, committed), false);
+});
+
+test("linked worktrees have independent branches and identities; detached HEAD is explicit", async (t) => {
+  const { home, root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  const worktree = join(home, "功能 worktree");
+  await git(root, "worktree", "add", "-b", "feature/login", worktree);
+  const main = await readGit(root, signal());
+  const feature = await readGit(worktree, signal());
+  assert.equal(main?.branch, "main");
+  assert.equal(feature?.branch, "feature/login");
+  assert.equal(main?.head, feature?.head, "same commit must not collapse different worktrees");
+  assert.equal(sameGit(main, feature), false);
+  assert.equal(await realpath(feature!.root), await realpath(worktree));
+  assert.match(formatStatus("zvec: ready", plain, feature), /feature\/login @ 功能 worktree/);
+  await git(worktree, "checkout", "--detach", "HEAD");
+  const detached = await readGit(worktree, signal());
+  assert.equal(detached?.branch, undefined);
+  assert.equal(detached?.head, feature?.head);
+  assert.equal(sameGit(feature, detached), false);
+  assert.ok(formatStatus("zvec: ready", plain, detached).includes(`detached@${detached!.head!.slice(0, 7)}`));
+});
+
+test("non-Git directories and missing Git do not break status rendering", async (t) => {
+  const { home } = await cacheFixture(t);
+  assert.equal(await readGit(home, AbortSignal.timeout(3000)), undefined);
+  const { env } = await mockServer(t, { result: { content: [], structuredContent: {
+    root: home, indexed: false,
+  } } });
+  setEnv(t, { PATH: "" });
+  const snapshot = await readSnapshot(home, AbortSignal.timeout(3000), env);
+  assert.equal(snapshot.text, "zvec: no index");
+  assert.equal(snapshot.git, undefined);
+  assert.match(snapshot.details, /Git: Not available/);
+  assert.equal(formatStatus(snapshot.text, plain), "○ zvec · no index");
+});
+
+test("repository environment overrides cannot point the display at another worktree", async (t) => {
+  const { root, signal } = await repository(t);
+  setEnv(t, { GIT_DIR: join(root, "missing.git"), GIT_WORK_TREE: "/wrong", GIT_COMMON_DIR: "/wrong" });
+  const context = await readGit(root, signal());
+  assert.equal(context?.branch, "main");
+  assert.equal(basename(context!.root), "main-tree");
+});
+
+test("aborted Git reads reject rather than returning a non-Git result", async (t) => {
+  const { root } = await repository(t);
+  await assert.rejects(readGit(root, AbortSignal.abort()), { name: "AbortError" });
+});
+
+test("a branch switch during a daemon query cannot label its response ready", async (t) => {
+  const { root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  let switched = false;
+  const { env } = await mockServer(t, async () => {
+    if (!switched) {
+      switched = true;
+      await git(root, "checkout", "-b", "feature/new");
+    }
+    return { result: { content: [], structuredContent: { root, indexed: true, status: "ready" } } };
+  });
+  const snapshot = await readSnapshot(root, signal(), env);
+  assert.equal(snapshot.text, "zvec: unknown");
+  assert.equal(snapshot.git?.branch, "feature/new");
+  assert.match(snapshot.details, /Changed during query; refresh status/);
+  const stable = await readSnapshot(root, signal(), env);
+  assert.equal(stable.text, "zvec: ready");
+  assert.match(stable.details, /Branch: feature\/new/);
+  assert.match(stable.details, /HEAD: [a-f0-9]{12}/);
+});
+
+test("the actual footer follows branch and detached HEAD changes without changing the query root", async (t) => {
+  const { root, git } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  const { env, calls } = await mockServer(t, { result: { content: [], structuredContent: { root, indexed: true, status: "ready" } } });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  type Handler = (_event: Record<string, never>, ctx: ExtensionContext) => Promise<void>;
+  const handlers = new Map<string, Handler>();
+  let open!: (_args: string, ctx: ExtensionContext) => Promise<void>;
+  extension({
+    on: (name: string, handler: Handler) => { handlers.set(name, handler); },
+    registerCommand: (_name: string, command: { handler: typeof open }) => { open = command.handler; },
+  } as unknown as ExtensionAPI);
+  const statuses: (string | undefined)[] = [];
+  const ctx = { mode: "tui", cwd: root, ui: {
+    theme: plain,
+    setStatus: (_key: string, value: string | undefined) => statuses.push(value),
+    custom: async () => "Close",
+    notify: () => assert.fail("no errors expected"),
+  } } as unknown as ExtensionContext;
+  t.after(() => handlers.get("session_shutdown")!({}, ctx));
+  await handlers.get("session_start")!({}, ctx);
+  await open("", ctx);
+  assert.match(statuses.at(-1)!, /main @ main-tree · ready \(last check\)/);
+  await git(root, "checkout", "-b", "feature/new");
+  await open("", ctx);
+  assert.match(statuses.at(-1)!, /feature\/new @ main-tree · ready \(last check\)/);
+  await git(root, "checkout", "--detach", "HEAD");
+  await open("", ctx);
+  assert.match(statuses.at(-1)!, /detached@[a-f0-9]{7} @ main-tree/);
+  const queries = calls.filter((call) => call.message?.params?.name === "zvec_grep_index_status");
+  assert.ok(queries.every((call) => call.message?.params?.arguments?.root === root));
+});
+
+test("switching branches during confirmation prevents index submission", async (t) => {
+  const { root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  const { env, calls } = await mockServer(t, { result: { content: [], structuredContent: {
+    root, indexed: true, status: "ready",
+    persistent: { workspace_index: { embedding: { provider: "remote", model: "existing" } } },
+  } } });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  const notifications: string[] = [];
+  let menus = 0;
+  await openPanel({ cwd: root, ui: {
+    custom: async () => menus++ === 0 ? "Update index (incremental)" : "Close",
+    confirm: async (_title: string, message: string) => {
+      assert.match(message, /Branch: main/);
+      await git(root, "checkout", "-b", "feature/changed");
+      return true;
+    },
+    notify: (message: string) => notifications.push(message),
+  } } as unknown as ExtensionContext, signal());
+  assert.match(notifications[0], /state has changed/);
+  assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
+});

@@ -12,7 +12,7 @@ import { describeStatus, indexWorkspace, readStatus, readSnapshot, serverUrl } f
 import { openPanel } from "../lib/panel.ts";
 import { isolateModelCache, mockServer, setEnv } from "./helpers.ts";
 
-const base = { root: "/workspace", indexed: true, index_policy: "enabled" };
+const base = { root: "/workspace", indexed: true, index_policy: "enabled", status: "ready" };
 
 type MenuFactory = Parameters<ExtensionContext["ui"]["custom"]>[0];
 
@@ -27,7 +27,7 @@ async function renderMenu(factory: MenuFactory) {
 }
 
 for (const [name, patch, expected] of [
-  ["Node ready", { persistent: { files: { stored: 42 } } }, "ready · 42 files"],
+  ["Node ready", { status: undefined, persistent: { files: { stored: 42, pending: 0, failed: 0 } } }, "ready · 42 files"],
   ["Rust ready", { status: "ready" }, "ready"],
   ["missing", { indexed: false }, "no index"],
   ["disabled", { indexed: false, index_policy: "disabled" }, "disabled"],
@@ -57,8 +57,15 @@ for (const [name, patch, expected] of [
   ["unknown policy", { index_policy: "future_policy" }, "unknown"],
   ["invalid policy", { index_policy: false }, "unknown"],
   ["undecided policy without index", { index_policy: "undecided", indexed: false }, "no index"],
-  ["legacy minimal ready", {}, "ready"],
-  ["idle successful job", { runtime: { job_state: "succeeded" } }, "ready"],
+  ["minimal response has no readiness evidence", { status: undefined }, "unknown"],
+  ["successful job alone is not readiness evidence", { status: undefined, runtime: { job_state: "succeeded" } }, "unknown"],
+  ["unknown compatibility never ready", { compatibility: { status: "future_incompatible" } }, "unknown"],
+  ["empty compatibility never ready", { compatibility: { status: "" } }, "unknown"],
+  ["known compatible index", { compatibility: { status: "compatible" } }, "ready"],
+  ["partial file counters", { status: undefined, persistent: { files: { stored: 42 } } }, "unknown"],
+  ["partial revisions", { runtime: { dirty_revision: 9 } }, "unknown"],
+  ["missing dirty revision", { runtime: { indexed_revision: 9 } }, "unknown"],
+  ["Node empty index", { status: undefined, persistent: { files: { stored: 0, pending: 0, failed: 0 } } }, "ready · 0 files"],
 ] satisfies [string, Record<string, unknown>, string][]) {
   test(name, () => assert.equal(describeStatus({ ...base, ...patch }), `zvec: ${expected}`));
 }
@@ -162,7 +169,7 @@ test("single zvec command opens the panel and skips unchanged footer output", as
   await handlers.get("session_start")({}, ctx);
   assert.deepEqual([...commands.keys()], ["zvec"]);
   await commands.get("zvec").handler("", ctx);
-  assert.deepEqual(statuses, [["zvec-status", "◌ zvec · checking"], ["zvec-status", "● zvec · ready"]]);
+  assert.deepEqual(statuses, [["zvec-status", "◌ zvec · checking"], ["zvec-status", "● zvec · ready (last check)"]]);
   assert.match(panels[0], /Project:\s+\/workspace/);
   await commands.get("zvec").handler("", ctx);
   response.persistent.files.stored = 2;
@@ -172,7 +179,7 @@ test("single zvec command opens the panel and skips unchanged footer output", as
   assert.deepEqual(notifications, []);
   ctx.ui.theme.fg = (_color, text) => `[${text}]`;
   await commands.get("zvec").handler("", ctx);
-  assert.deepEqual(statuses.at(-1), ["zvec-status", "[●] [zvec][ · ][ready]"]);
+  assert.deepEqual(statuses.at(-1), ["zvec-status", "[●] [zvec][ · ][ready (last check)]"]);
   response.indexed = false;
   await commands.get("zvec").handler("", ctx);
   assert.deepEqual(statuses.at(-1), ["zvec-status", "[○] [zvec][ · ][no index]"]);

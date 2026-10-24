@@ -69,7 +69,7 @@ test("unsupported session termination does not discard a valid status result", a
     if (message.id === undefined) { res.writeHead(202).end(); return; }
     const result = message.method === "initialize"
       ? { protocolVersion: "2024-11-05", capabilities: { tools: {} }, serverInfo: { name: "test", version: "1" } }
-      : { content: [], structuredContent: { root: "/workspace", indexed: true } };
+      : { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } };
     res.writeHead(200, { "Content-Type": "application/json", "mcp-session-id": "test-session" });
     res.end(JSON.stringify({ jsonrpc: "2.0", id: message.id, result }));
   });

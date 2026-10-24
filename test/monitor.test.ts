@@ -3,6 +3,7 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import extension from "../index.ts";
 import { createMonitor } from "../lib/monitor.ts";
+import { formatStatus } from "../lib/display.ts";
 
 function deferred() {
   let resolve!: (value: string) => void;
@@ -66,6 +67,37 @@ test("polls after completion, and clears polling on stop", async (t) => {
   await monitor.stop();
   t.mock.timers.tick(30_000);
   assert.equal(calls, 2);
+});
+
+test("cached ready is explicitly a last check, and failed refreshes remove it", async (t) => {
+  t.mock.timers.enable({ apis: ["setTimeout"] });
+  const pending = deferred();
+  const rendered: string[] = [];
+  let calls = 0;
+  const monitor = createMonitor({
+    read: () => {
+      calls++;
+      if (calls === 1) return Promise.resolve("zvec: ready");
+      if (calls === 2) return pending.promise;
+      throw new Error("daemon unavailable");
+    },
+    render: (text) => rendered.push(formatStatus(text, { fg: (_color, value) => value })),
+  });
+  t.after(() => monitor.stop());
+  await monitor.refresh();
+  t.mock.timers.tick(29_999);
+  assert.equal(calls, 1);
+  assert.equal(rendered.at(-1), "● zvec · ready (last check)");
+  t.mock.timers.tick(1);
+  const refreshing = monitor.refresh();
+  await Promise.resolve();
+  assert.equal(calls, 2);
+  assert.equal(rendered.at(-1), "● zvec · ready (last check)");
+  pending.resolve("zvec: stale");
+  await refreshing;
+  assert.equal(rendered.at(-1), "! zvec · stale");
+  await monitor.refresh();
+  assert.equal(rendered.at(-1), "! zvec · unavailable");
 });
 
 test("passes a deadline signal to the reader", async () => {

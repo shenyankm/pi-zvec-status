@@ -18,7 +18,7 @@ export function createIndexMenu(snapshot: Snapshot, options: string[], theme: Th
   let layout: { width: number; header: string[]; footer: string[] } | undefined;
 
   function renderLayout(width: number, inner: number) {
-    const [project, , model, files, path] = snapshot.details.split("\n");
+    const [project, , model, files, path, ...git] = snapshot.details.split("\n");
     const status = snapshot.text.replace(/^zvec: /, "");
     const color = status.startsWith("ready") ? "success"
       : status === "failed" ? "error" : snapshot.busy ? "accent" : "warning";
@@ -39,6 +39,7 @@ export function createIndexMenu(snapshot: Snapshot, options: string[], theme: Th
       row(project, true),
       row(model),
       row(path, true),
+      ...git.map((line) => row(line, line.startsWith("Worktree: "))),
       "",
       theme.fg("muted", theme.bold("Actions")),
     ].flatMap((line) => line ? new Text(line, 0, 0).render(inner) : [""]);

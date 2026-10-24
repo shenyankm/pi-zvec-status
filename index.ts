@@ -1,7 +1,8 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { createMonitor } from "./lib/monitor.ts";
 import { formatStatus } from "./lib/display.ts";
-import { readStatus } from "./lib/status.ts";
+import { readSnapshot } from "./lib/status.ts";
+import type { GitContext } from "./lib/git.ts";
 import { openPanel } from "./lib/panel.ts";
 
 export default function (pi: ExtensionAPI) {
@@ -18,15 +19,21 @@ export default function (pi: ExtensionAPI) {
     if (ctx.mode !== "tui") return;
     session = new AbortController();
     let displayed: string | undefined;
+    let git: GitContext | undefined;
     const render = (text: string) => {
-      const formatted = formatStatus(text, ctx.ui.theme);
+      const formatted = formatStatus(text, ctx.ui.theme, git);
       if (formatted === displayed) return;
       ctx.ui.setStatus("zvec-status", formatted);
       displayed = formatted;
     };
     render("zvec: checking");
     monitor = createMonitor({
-      read: (signal) => readStatus(ctx.cwd, signal),
+      read: async (signal) => {
+        git = undefined;
+        const snapshot = await readSnapshot(ctx.cwd, signal);
+        git = snapshot.git;
+        return snapshot.text;
+      },
       render,
     });
     void monitor.refresh();

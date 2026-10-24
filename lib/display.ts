@@ -1,6 +1,9 @@
 import type { Theme, ThemeColor } from "@earendil-works/pi-coding-agent";
+import { basename } from "node:path";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+import type { GitContext } from "./git.ts";
 
-export function formatStatus(text: string, theme: Pick<Theme, "fg">) {
+export function formatStatus(text: string, theme: Pick<Theme, "fg">, git?: GitContext) {
   const state = text.replace(/^zvec: /, "");
   let icon = "○";
   let color: ThemeColor = "muted";
@@ -9,7 +12,7 @@ export function formatStatus(text: string, theme: Pick<Theme, "fg">) {
   if (state === "ready" || state.startsWith("ready · ")) {
     icon = "●";
     color = "success";
-    detail = "ready";
+    detail = "ready (last check)";
   } else if (/^(checking|indexing|queued)( |$)/.test(state)) {
     icon = "◌";
     color = "accent";
@@ -22,5 +25,10 @@ export function formatStatus(text: string, theme: Pick<Theme, "fg">) {
   }
 
   const label = theme.fg(color, icon) + " " + theme.fg("muted", "zvec");
-  return label + theme.fg("dim", " · ") + theme.fg(color, detail);
+  const compact = (value: string) => truncateToWidth(value.replace(/[\x00-\x1f\x7f-\x9f]/g, ""), 20, "…");
+  const context = git
+    ? theme.fg("dim", " · ") + theme.fg("muted",
+      `${compact(git.branch ?? `detached@${git.head?.slice(0, 7)}`)} @ ${compact(basename(git.root))}`)
+    : "";
+  return label + context + theme.fg("dim", " · ") + theme.fg(color, detail);
 }
