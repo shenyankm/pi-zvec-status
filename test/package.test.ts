@@ -23,7 +23,7 @@ test("MIT license and public repository metadata are included in the package", a
   assert.equal(manifest.bugs.url, "https://github.com/shenyankm/pi-zvec-status/issues");
   assert.ok(manifest.files.includes("LICENSE"));
   const license = await readFile(new URL("LICENSE", root), "utf8");
-  assert.ok(license.startsWith("MIT License\n"));
+  assert.match(license, /^MIT License\r?\n/);
   assert.match(license, /Copyright \(c\) 2026 shenyankm/);
   assert.match(license, /Permission is hereby granted, free of charge/);
   assert.match(license, /THE SOFTWARE IS PROVIDED "AS IS"/);
