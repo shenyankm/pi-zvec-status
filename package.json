@@ -2,6 +2,16 @@
   "name": "pi-zvec-status",
   "version": "0.1.0",
   "description": "zvec-grep index status and workspace management for Pi.",
+  "license": "MIT",
+  "author": "shenyankm",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/shenyankm/pi-zvec-status.git"
+  },
+  "homepage": "https://github.com/shenyankm/pi-zvec-status#readme",
+  "bugs": {
+    "url": "https://github.com/shenyankm/pi-zvec-status/issues"
+  },
   "type": "module",
   "keywords": [
     "pi-package",
@@ -12,7 +22,8 @@
     "index.ts",
     "lib/",
     "docs/",
-    "README.md"
+    "README.md",
+    "LICENSE"
   ],
   "pi": {
     "extensions": [
@@ -28,8 +39,8 @@
     "coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-exclude=test/** --test-skip-pattern=\"^Pi loader smoke:\" test/*.test.ts"
   },
   "peerDependencies": {
-    "@earendil-works/pi-coding-agent": "^1.4.0",
-    "@earendil-works/pi-tui": "^1.4.0"
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.32.2"

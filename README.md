@@ -36,21 +36,30 @@ The interface is in English. The extension uses Pi's current working directory a
 
 Requires Node.js 22.19+, Pi 1.4.x or a later compatible release in the same 1.x series using `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui`, and a local zvec-grep HTTP MCP service supporting `zvec_grep_index_status`.
 
-Install from a local checkout:
+Install directly from GitHub using Pi's package manager:
 
 ```bash
-cd /Users/sheny/Developer/code/pi-zvec-status
+pi install git:github.com/shenyankm/pi-zvec-status
+```
+
+Run `/reload` in an existing Pi session, or start a new session. Pi installs runtime dependencies for Git packages and provides the host packages itself.
+
+For local development:
+
+```bash
+git clone https://github.com/shenyankm/pi-zvec-status.git
+cd pi-zvec-status
 npm ci --omit=peer
-pi install /Users/sheny/Developer/code/pi-zvec-status
+pi install .
 ```
 
-Run `/reload` in an existing Pi session, or start a new session. To try the extension without installing it:
+To try a local checkout without installing it:
 
 ```bash
-pi -e /Users/sheny/Developer/code/pi-zvec-status/index.ts
+pi -e /absolute/path/to/pi-zvec-status/index.ts
 ```
 
-These absolute paths are examples from the development machine. Replace them with your checkout's location.
+Replace the example path with your checkout's location. Local packages are loaded in place; install their dependencies yourself.
 
 ### zvec-grep service
 
@@ -160,7 +169,7 @@ npm pack --dry-run
 
 Source and tests use TypeScript with strict type checking. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs type checking before the tests.
 
-The official MCP SDK is loaded on the first query, not in non-TUI modes. The custom menu loads only when opened and uses Pi's native pi-tui components without another UI framework. TypeScript, Node types, and the Pi/pi-tui packages used for development are `devDependencies`. Pi and pi-tui are also declared as host `peerDependencies` and are not bundled.
+The official MCP SDK is loaded on the first query, not in non-TUI modes. The custom menu loads only when opened and uses Pi's native pi-tui components without another UI framework. TypeScript, Node types, and the Pi/pi-tui packages used for development are `devDependencies`. Pi and pi-tui are also declared as host `peerDependencies` with `"*"` ranges and are not bundled, following the [official Pi package guidelines](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/packages.md#declare-dependencies). Development dependency versions remain constrained for type checking and CI; wildcard host peers do not imply compatibility with every Pi release.
 
 Tests cover state mapping, real HTTP MCP protocol exchanges with local mock servers, authentication, read-only calls, connection cleanup, refresh coalescing, footer deduplication and theme changes, menus, confirmations and cancellations, submission arguments, error recovery, and non-interactive modes.
 
@@ -168,12 +177,16 @@ Tests use temporary caches and do not depend on models downloaded by the user. R
 
 `npm run check` includes a real Pi loader smoke test for package discovery and TypeScript loading. `npm run coverage` counts only extension source and filters out that smoke test by name to prevent jiti-transpiled copies from distorting original source line coverage. The full smoke test still runs in `check`.
 
-GitHub Actions covers Linux, macOS, Windows, Node 22.19 and 24, and the locked Pi 1.4.0 host plus the latest compatible 1.x host. The workflow runs after pushing to GitHub. CI does not download models or operate on real indexes. For isolated live-daemon and terminal checks, see the [manual verification checklist](docs/verification.md). The project owner still needs to choose a license before release.
+GitHub Actions covers Linux, macOS, Windows, Node 22.19 and 24, and the locked Pi 1.4.0 host plus the latest compatible 1.x host. The workflow runs after pushing to GitHub. CI does not download models or operate on real indexes. For isolated live-daemon and terminal checks, see the [manual verification checklist](docs/verification.md). The package uses an explicit `pi.extensions` manifest for discovery, a TypeScript default factory for registration, session-scoped startup/cleanup, and Pi's native UI APIs, as described in the [official extension documentation](https://github.com/earendil-works/pi/blob/main/packages/coding-agent/docs/extensions.md).
 
 ## Uninstall
 
 ```bash
-pi remove /Users/sheny/Developer/code/pi-zvec-status
+pi remove git:github.com/shenyankm/pi-zvec-status
 ```
 
-Then run `/reload`. Uninstalling does not stop a shared zvec-grep daemon or delete any index.
+For a local installation, pass the same local path used during installation to `pi remove` instead. Then run `/reload`. Uninstalling does not stop a shared zvec-grep daemon or delete any index.
+
+## License
+
+[MIT](LICENSE) © 2026 shenyankm. Third-party dependencies retain their own licenses.
