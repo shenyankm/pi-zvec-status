@@ -10,6 +10,7 @@ import { join } from "node:path";
 import extension from "../index.ts";
 import { describeStatus, readStatus, readSnapshot, serverUrl } from "../lib/status.ts";
 import { openPanel } from "../lib/panel.ts";
+import { indexActions } from "../lib/menu.ts";
 import { isolateModelCache, mockServer, setEnv } from "./helpers.ts";
 
 const base = { root: "/workspace", indexed: true, index_policy: "enabled", status: "ready" };
@@ -84,6 +85,24 @@ for (const [name, patch, expected] of [
   ],
 ] satisfies [string, Record<string, unknown>, string][]) {
   test(name, () => assert.equal(describeStatus({ ...base, ...patch }), `zvec: ${expected}`));
+}
+
+for (const status of ["future_state", "", "\x1b[2J"]) {
+  for (const nested of [false, true]) {
+    test(`unknown state stays read-only without an index (${JSON.stringify(status)}, nested=${nested})`, () => {
+      const text = describeStatus({
+        ...base,
+        indexed: false,
+        ...(nested ? { runtime: { index_status: { status } } } : { status }),
+      });
+      assert.equal(text, "zvec: unknown");
+      assert.deepEqual(indexActions({ text, indexed: false, busy: false, details: "" }), [
+        "Refresh status",
+        "Worktree overview",
+        "Close",
+      ]);
+    });
+  }
 }
 
 for (const field of ["added", "modified", "deleted"]) {
@@ -318,6 +337,43 @@ test("snapshot includes model and file counts without terminal control character
   assert.match(snapshot.details, /Files: 4 · Pending: 2 · Failed: 1/);
   assert.ok(!snapshot.details.includes("\u001b"));
 });
+
+for (const text of ["zvec: checking", "zvec: status expired", "zvec: unavailable"]) {
+  test(`confirmation cannot submit after the status becomes ${text}`, async (t) => {
+    const { calls, env } = await mockServer(t, {
+      result: { content: [], structuredContent: { state: "running" } },
+    });
+    setEnv(t, env);
+    const snapshot = {
+      text: "zvec: ready",
+      details: "Project: /workspace\nStatus: ready\nModel: remote/test\nFiles: 1\nIndex path: /index",
+      checkedAt: Date.now(),
+      indexed: true,
+      busy: false,
+      model: "remote/test",
+      git: undefined,
+    };
+    let confirmed = false;
+    const notifications: string[] = [];
+    const ctx = {
+      cwd: "/workspace",
+      ui: {
+        custom: async () => (confirmed ? "Close" : "Update index (incremental)"),
+        confirm: async () => {
+          confirmed = true;
+          return true;
+        },
+        notify: (message: string) => notifications.push(message),
+      },
+    } as unknown as ExtensionContext;
+    await openPanel(ctx, AbortSignal.timeout(2000), {
+      read: async () => ({ ...snapshot, text: confirmed ? text : snapshot.text }),
+      subscribe: () => () => {},
+    });
+    assert.equal(calls.length, 0, "read-only status must prevent submission");
+    assert.match(notifications[0], /state has changed/);
+  });
+}
 
 interface PanelCase {
   name: string;

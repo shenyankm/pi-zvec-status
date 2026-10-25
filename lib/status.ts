@@ -266,6 +266,7 @@ export function describeStatus(data: unknown) {
     return "zvec: failed";
   }
   if (job === "cancelled") return "zvec: cancelled";
+  if (state !== undefined && state !== "ready" && state !== "stale") return "zvec: unknown";
   if (!data.indexed) return "zvec: no index";
   if (
     state === "stale" ||
@@ -278,7 +279,6 @@ export function describeStatus(data: unknown) {
   }
   if (
     (runtime?.dirty_revision !== undefined) !== (runtime?.indexed_revision !== undefined) ||
-    (state !== undefined && state !== "ready") ||
     (state !== "ready" && !(count(files?.stored) && count(files?.pending) && count(files?.failed)))
   ) {
     return "zvec: unknown";

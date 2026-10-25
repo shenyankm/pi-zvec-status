@@ -65,8 +65,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
       // Another client may have started a job while the confirmation was open.
       const latest = await read();
       if (
-        latest.busy ||
-        latest.text === "zvec: unknown" ||
+        !indexActions(latest).includes(action) ||
         latest.model !== snapshot.model ||
         latest.indexed !== snapshot.indexed ||
         !sameGit(snapshot.git, latest.git)
