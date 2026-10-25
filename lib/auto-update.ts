@@ -51,16 +51,19 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
       candidate = undefined;
       const current = controller;
       const signal = AbortSignal.any([parentSignal, current.signal]);
+      let submitted = false;
       try {
-        const choices = await localModelChoices(process.env, undefined, signal);
+        const choices = await localModelChoices(process.env, undefined, signal, snapshot.model);
         if (choices.find((choice) => choice.model === snapshot.model)?.status !== "Downloaded") return false;
         const latest = await readSnapshot(root, signal);
         signal.throwIfAborted();
         if (!eligible(latest) || latest.model !== snapshot.model || !sameGit(snapshot.git, latest.git)) return false;
+        submitted = true;
         await indexWorkspace(root, {}, signal);
         nextAttemptAt = Date.now() + 60_000;
         return true;
       } catch {
+        if (!submitted && parentSignal.aborted) return false;
         if (current === controller) {
           enabled = false;
           await onError();

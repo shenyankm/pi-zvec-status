@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdir, writeFile, truncate, stat, chmod, readFile, open, utimes } from "node:fs/promises";
 import { join } from "node:path";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { confirmModelDownload, localModelChoices } from "../lib/models.ts";
 import { modelSnapshots } from "../lib/model-cache-data.ts";
 
@@ -18,6 +20,31 @@ test("missing cache lists every model as not downloaded without creating it", as
   await assert.rejects(stat(cache), { code: "ENOENT" });
   assert.ok(choices.every((choice) => choice.status === "Not downloaded"));
   assert.ok(choices.every((choice) => choice.label.endsWith(choice.model)));
+});
+
+test("single-model checks avoid touching unrelated model caches and still validate mutations", async (t) => {
+  const { home, cache } = await fixture(t);
+  const { directory, snapshot } = await cachedSnapshot(cache, potion);
+  const paths: string[] = [];
+  const originalStat = fs.stat;
+  t.mock.method(fs, "stat", async (path: Parameters<typeof stat>[0]) => {
+    paths.push(String(path));
+    return originalStat(path);
+  });
+  syncBuiltinESMExports();
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
+  const choices = await localModelChoices({}, home, AbortSignal.timeout(2000), potion);
+  assert.deepEqual(
+    choices.map((choice) => [choice.model, choice.status]),
+    [[potion, "Downloaded"]],
+  );
+  assert.equal(paths.length, 5, "only the global config, two model markers, and two artifact files need path stats");
+  await utimes(join(directory, snapshot.files[0][0]), new Date(), new Date(Date.now() + 2000));
+  assert.equal((await localModelChoices({}, home, AbortSignal.timeout(2000), potion))[0].status, "Cache unknown");
+  assert.deepEqual(await localModelChoices({}, home, AbortSignal.timeout(2000), "local/unknown"), []);
 });
 
 test("complete GGUF, Model2Vec, and ModelScope snapshots are downloaded and sorted first", async (t) => {

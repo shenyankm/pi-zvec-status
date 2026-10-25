@@ -1,4 +1,4 @@
-import { getAgentDir, type ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 import { readAutoUpdateSetting, writeAutoUpdateSetting } from "./lib/settings.ts";
 import { createMonitor } from "./lib/monitor.ts";
@@ -9,6 +9,7 @@ import { showWorktreeOverview } from "./lib/worktrees.ts";
 import { createAutoUpdater } from "./lib/auto-update.ts";
 
 export default function (pi: ExtensionAPI) {
+  let lifecycle = 0;
   let monitor: ReturnType<typeof createMonitor> | undefined;
   let source: StatusSource | undefined;
   let session: AbortController | undefined;
@@ -18,6 +19,7 @@ export default function (pi: ExtensionAPI) {
   let onFocus: ((data: string | Buffer) => void) | undefined;
 
   async function stop() {
+    const generation = ++lifecycle;
     session?.abort();
     session = undefined;
     source = undefined;
@@ -30,12 +32,15 @@ export default function (pi: ExtensionAPI) {
     const previous = monitor;
     monitor = undefined;
     await previous?.stop();
+    return generation;
   }
 
   pi.on("session_start", async (_event, ctx) => {
-    await stop();
-    if (ctx.mode !== "tui") return;
+    const generation = await stop();
+    if (generation !== lifecycle || ctx.mode !== "tui") return;
     const currentSession = (session = new AbortController());
+    const { getAgentDir } = await import("@earendil-works/pi-coding-agent");
+    if (currentSession.signal.aborted) return;
     const settingsPath = join(getAgentDir(), "zvec-status.json");
     let autoUpdateFailed = false;
     let settingsFailed = false;

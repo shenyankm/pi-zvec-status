@@ -91,6 +91,7 @@ export async function localModelChoices(
   env: NodeJS.ProcessEnv = process.env,
   home = homedir(),
   signal = AbortSignal.timeout(10_000),
+  onlyModel?: string,
 ) {
   signal.throwIfAborted();
   let cache: string | undefined;
@@ -101,17 +102,19 @@ export async function localModelChoices(
   }
   // shortcut: matches zvec-grep 0.2.2 snapshots without hashing model weights; update when its catalog or cache format changes.
   const choices = await Promise.all(
-    Object.entries(modelSnapshots).map(async ([model, snapshots]) => {
-      const statuses = cache
-        ? await Promise.all(snapshots.map((snapshot) => snapshotStatus(cache!, snapshot, signal)))
-        : [];
-      const status: CacheStatus = statuses.includes("Downloaded")
-        ? "Downloaded"
-        : !cache || statuses.includes("Cache unknown")
-          ? "Cache unknown"
-          : "Not downloaded";
-      return { model, status, label: `[${status}]`.padEnd(17) + model };
-    }),
+    Object.entries(modelSnapshots)
+      .filter(([model]) => onlyModel === undefined || model === onlyModel)
+      .map(async ([model, snapshots]) => {
+        const statuses = cache
+          ? await Promise.all(snapshots.map((snapshot) => snapshotStatus(cache!, snapshot, signal)))
+          : [];
+        const status: CacheStatus = statuses.includes("Downloaded")
+          ? "Downloaded"
+          : !cache || statuses.includes("Cache unknown")
+            ? "Cache unknown"
+            : "Not downloaded";
+        return { model, status, label: `[${status}]`.padEnd(17) + model };
+      }),
   );
   signal.throwIfAborted();
   const order: Record<CacheStatus, number> = { Downloaded: 0, "Cache unknown": 1, "Not downloaded": 2 };

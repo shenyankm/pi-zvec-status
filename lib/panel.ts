@@ -62,7 +62,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
       }
       let downloadAllowed = false;
       if (model.startsWith("local/")) {
-        choices ??= await localModelChoices(process.env, undefined, deadline());
+        choices ??= await localModelChoices(process.env, undefined, deadline(), model);
         const choice = choices.find((choice) => choice.model === model) ?? { model, status: "Cache unknown" as const };
         if (!(await confirmModelDownload(ctx.ui, choice, signal))) continue;
         downloadAllowed = choice.status !== "Downloaded";
@@ -94,7 +94,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
         continue;
       }
       if (model.startsWith("local/") && !downloadAllowed) {
-        const choice = (await localModelChoices(process.env, undefined, deadline())).find(
+        const choice = (await localModelChoices(process.env, undefined, deadline(), model)).find(
           (choice) => choice.model === model,
         );
         if (choice?.status !== "Downloaded") {

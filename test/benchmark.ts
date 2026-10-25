@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
 import { performance } from "node:perf_hooks";
+import { execFileSync } from "node:child_process";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { localModelChoices } from "../lib/models.ts";
+import { modelSnapshots } from "../lib/model-cache-data.ts";
+import { cachedSnapshot } from "./helpers.ts";
 import type { Theme } from "@earendil-works/pi-coding-agent";
 import { createIndexMenu } from "../lib/menu.ts";
 
@@ -32,4 +39,49 @@ for (const scenario of ["redraw", "navigate", "resize", "invalidate"] as const) 
   }
   samples.sort((a, b) => a - b);
   console.log(`${scenario}: ${samples[2].toFixed(2)} ms / ${iterations} renders (median of 5, one warmup)`);
+}
+
+const imports: number[] = [];
+for (let round = 0; round < 6; round++) {
+  const result = execFileSync(
+    process.execPath,
+    [
+      "--experimental-strip-types",
+      "--input-type=module",
+      "-e",
+      `const start = performance.now(); await import(${JSON.stringify(new URL("../index.ts", import.meta.url).href)}); console.log(performance.now() - start);`,
+    ],
+    { encoding: "utf8", timeout: 10_000 },
+  );
+  if (round > 0) imports.push(Number(result.trim()));
+}
+imports.sort((a, b) => a - b);
+console.log(`extension import: ${imports[2].toFixed(2)} ms (fresh process, median of 5, one warmup)`);
+
+const home = await mkdtemp(join(tmpdir(), "zvec-perf-"));
+try {
+  const cache = join(home, "models");
+  for (const model of Object.keys(modelSnapshots)) await cachedSnapshot(cache, model);
+  for (const onlyModel of [undefined, "local/potion-code-16m-v2"]) {
+    const samples: number[] = [];
+    for (let round = 0; round < 6; round++) {
+      const start = performance.now();
+      for (let iteration = 0; iteration < 50; iteration++) {
+        const choices = await localModelChoices(
+          { ZVEC_GREP_MODEL_CACHE: cache },
+          home,
+          AbortSignal.timeout(10_000),
+          onlyModel,
+        );
+        assert.equal(choices.find((choice) => choice.model === "local/potion-code-16m-v2")?.status, "Downloaded");
+      }
+      if (round > 0) samples.push(performance.now() - start);
+    }
+    samples.sort((a, b) => a - b);
+    console.log(
+      `model cache ${onlyModel ? "current model" : "catalog"}: ${samples[2].toFixed(2)} ms / 50 checks (median of 5, one warmup)`,
+    );
+  }
+} finally {
+  await rm(home, { recursive: true, force: true });
 }

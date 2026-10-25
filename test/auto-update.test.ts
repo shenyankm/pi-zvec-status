@@ -35,6 +35,7 @@ for (const scenario of [
   "state changed",
   "model changed",
   "disabled during read",
+  "cancelled during read",
   "rejected",
   "timeout",
 ] as const) {
@@ -53,6 +54,7 @@ for (const scenario of [
           : { result: { content: [], structuredContent: { state: "queued" } } };
       }
       if (scenario === "disabled during read") updater.setEnabled(false);
+      if (scenario === "cancelled during read") controller.abort();
       return {
         result: {
           content: [],
@@ -90,7 +92,11 @@ for (const scenario of [
       now += 120_000;
       assert.equal(await updater.update(snapshot, new AbortController().signal), false);
       assert.equal(writes().length, 1, "uncertain submissions must not retry automatically");
-    } else assert.deepEqual(errors, []);
+    } else {
+      assert.deepEqual(errors, []);
+      if (scenario === "cancelled during read")
+        assert.equal(updater.enabled, true, "shutdown before submission must not disable the global preference");
+    }
   });
 }
 

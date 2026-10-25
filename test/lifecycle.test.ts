@@ -104,6 +104,23 @@ for (const mode of ["session switch", "reload"] as const) {
   );
 }
 
+test("shutdown during asynchronous session startup cannot start a late monitor", async () => {
+  const app = harness();
+  const statuses: (string | undefined)[] = [];
+  const continuations = process.listenerCount("SIGCONT");
+  const ctx = {
+    mode: "tui",
+    cwd: "/workspace",
+    ui: { ...plainUI, setStatus: (_key: string, value: string | undefined) => statuses.push(value) },
+  } as unknown as ExtensionContext;
+  const starting = app.start(ctx);
+  await Promise.resolve();
+  await app.stop(ctx);
+  await starting;
+  assert.deepEqual(statuses, [undefined]);
+  assert.equal(process.listenerCount("SIGCONT"), continuations);
+});
+
 test("repeated commands open only one menu per session", { timeout: 5000 }, async (t) => {
   const { env } = await mockServer(t, { result: { content: [], structuredContent: snapshot } });
   setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
