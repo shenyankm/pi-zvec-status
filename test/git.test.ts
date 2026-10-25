@@ -59,6 +59,26 @@ test("unborn branches and subdirectories retain the worktree root", async (t) =>
   assert.equal(sameGit(unborn, committed), false);
 });
 
+test("upstream progress does not change local identity; local edits still do", async (t) => {
+  const { root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  await git(root, "branch", "upstream");
+  await git(root, "branch", "--set-upstream-to=upstream", "main");
+  await git(root, "commit", "--allow-empty", "-m", "local one");
+  await git(root, "commit", "--allow-empty", "-m", "local two");
+  const before = await readGit(root, signal());
+  assert.equal(before?.branch, "main");
+  assert.equal(before?.dirty, false);
+  await git(root, "update-ref", "refs/heads/upstream", "HEAD^");
+  assert.equal(sameGit(before, await readGit(root, signal())), true);
+  await writeFile(join(root, "untracked.txt"), "local edit\n");
+  const edited = await readGit(root, signal());
+  assert.equal(edited?.dirty, true);
+  assert.equal(sameGit(before, edited), false);
+  await git(root, "commit", "--allow-empty", "-m", "new HEAD");
+  assert.equal(sameGit(edited, await readGit(root, signal())), false);
+});
+
 test("linked worktrees have independent branches and identities; detached HEAD is explicit", async (t) => {
   const { home, root, git, signal } = await repository(t);
   await git(root, "commit", "--allow-empty", "-m", "initial");
@@ -128,7 +148,9 @@ test("a snapshot uses four Git processes and one read-only MCP call", async (t) 
   }
   assert.equal(children.length, 4);
   assert.equal(children.filter((child) => child.spawnargs.includes("rev-parse")).length, 2);
-  assert.equal(children.filter((child) => child.spawnargs.includes("status")).length, 2);
+  const statuses = children.filter((child) => child.spawnargs.includes("status"));
+  assert.equal(statuses.length, 2);
+  assert.ok(statuses.every((child) => child.spawnargs.includes("--no-ahead-behind")));
   assert.equal(calls.filter((call) => call.message?.method === "tools/call").length, 1);
   assert.ok(calls.some((call) => call.message?.params?.name === "zvec_grep_index_status"));
 });

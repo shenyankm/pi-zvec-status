@@ -41,7 +41,12 @@ export async function runGit(cwd: string, args: string[], signal: AbortSignal) {
 export async function readGit(cwd: string, signal: AbortSignal): Promise<GitContext | undefined> {
   const [pathsOutput, statusOutput] = await Promise.all([
     runGit(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"], signal),
-    runGit(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"], signal),
+    // Only local state is used; avoid walking history to count upstream divergence.
+    runGit(
+      cwd,
+      ["status", "--porcelain=v2", "--branch", "--no-ahead-behind", "-z", "--untracked-files=normal"],
+      signal,
+    ),
   ]);
   if (!pathsOutput || statusOutput === undefined) return;
   const paths = pathsOutput.replace(/\r?\n$/, "").split(/\r?\n/);

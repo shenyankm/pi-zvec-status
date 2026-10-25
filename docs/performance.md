@@ -122,3 +122,26 @@ The request/process reductions are deterministic regression assertions. Millisec
 - No dependencies, connection pools, polling changes, or weakened model/download/index-operation validation were added.
 
 This follow-up did not rerun native-daemon/real-Pi PTY acceptance or cross-platform CI. Network filesystems, model inference throughput, and indexing throughput are outside these measurements.
+
+## Skip unused upstream divergence counts
+
+`readGit()` now passes `--no-ahead-behind` to `git status`. The extension uses local HEAD, branch, worktree changes, and operation markers, not upstream commit counts. Avoiding those counts removes a history walk on every status read (twice per full snapshot). No Git reads, cancellation, output limits, or index-write checks were removed; no status cache or dependency was added.
+
+The benchmark now creates a disposable 20,000-commit repository with its upstream at the first commit using `git fast-import`. It does not touch the current repository or create an index. Before/after measurements used the same expanded benchmark on Darwin arm64, Node v22.23.2, with one discarded warmup and the median of five samples of 20 reads. Benchmarks ran without the test suite running concurrently.
+
+| Scenario | Before | After | Observation |
+| --- | ---: | ---: | --- |
+| Git read, 19,999 commits ahead of upstream | 51.90 ms | 9.52 ms | 81.7% less time, 5.45× faster |
+| Git read, unborn repository | 9.71 ms | 9.09 ms | Small local timing difference |
+| Complete snapshot, unborn repository and mock MCP | 26.30 ms | 25.24 ms | Small local timing difference |
+
+These are informational microbenchmarks, not end-to-end Pi or indexing speedups. Savings depend on repository history and Git's commit-graph/cache state; repositories without upstream tracking avoid no history walk.
+
+Validation:
+
+- Both new regression checks fail before the production change and pass afterward: snapshots explicitly disable divergence counting, and moving an upstream ref leaves local identity unchanged while untracked edits and local HEAD changes remain detectable.
+- `npm run check`: 236 tests, 234 passed, two skipped, no failures.
+- `npm run coverage`: 97.73% lines, 95.92% branches, 93.75% functions; existing gates pass.
+- `npm run benchmark` and `git diff --check` pass.
+
+Native-daemon/real-Pi PTY acceptance and Windows/Linux CI were not rerun. Existing branch-switch, conflict, linked-worktree, cancellation, and automatic-update regression tests remain included in the full suite.

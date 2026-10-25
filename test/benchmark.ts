@@ -117,3 +117,33 @@ await test("status polling benchmark", async (t) => {
     calls.every((call) => !call.message?.params?.name || call.message.params.name === "zvec_grep_index_status"),
   );
 });
+
+await test("Git polling with a distant upstream", async (t) => {
+  const { home: root } = await cacheFixture(t);
+  execFileSync("git", ["init", "--initial-branch=main", root], { stdio: "ignore" });
+  // Build history without thousands of subprocesses or touching a real repository.
+  const commits = Array.from(
+    { length: 20_000 },
+    (_, i) =>
+      `commit refs/heads/main\nmark :${i + 1}\ncommitter Test <test@example.invalid> ${1700000000 + i} +0000\ndata 1\nx\n\n`,
+  ).join("");
+  execFileSync("git", ["-C", root, "fast-import", "--quiet"], {
+    input: `${commits}reset refs/heads/upstream\nfrom :1\n\ndone\n`,
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  execFileSync("git", ["-C", root, "branch", "--set-upstream-to=upstream", "main"], { stdio: "ignore" });
+  const samples: number[] = [];
+  for (let round = 0; round < 6; round++) {
+    const start = performance.now();
+    for (let iteration = 0; iteration < 20; iteration++) {
+      const context = await readGit(root, AbortSignal.timeout(10_000));
+      assert.equal(context?.branch, "main");
+      assert.equal(context?.dirty, false);
+    }
+    if (round > 0) samples.push((performance.now() - start) / 20);
+  }
+  samples.sort((a, b) => a - b);
+  console.log(
+    `poll git, 19,999 commits ahead: ${samples[2].toFixed(2)} ms / read (median of 5 × 20 reads, one warmup)`,
+  );
+});
