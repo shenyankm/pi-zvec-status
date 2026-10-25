@@ -1,6 +1,6 @@
 {
   "name": "pi-zvec-status",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "zvec-grep index status and workspace management for Pi.",
   "license": "MIT",
   "author": "shenyankm",
