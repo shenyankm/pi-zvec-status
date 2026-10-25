@@ -47,7 +47,7 @@ async function requestTool(
     import("@modelcontextprotocol/sdk/client/streamableHttp.js"),
   ]);
   signal.throwIfAborted();
-  const client = new Client({ name: "pi-zvec-status", version: "0.1.0" });
+  const client = new Client({ name: "pi-zvec-status", version: "0.2.0" });
   const transport = new StreamableHTTPClientTransport(url, {
     requestInit: {
       headers: token ? { Authorization: `Bearer ${token}` } : {},
