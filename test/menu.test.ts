@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionContext, Theme } from "@earendil-works/pi-coding-agent";
-import { visibleWidth } from "@earendil-works/pi-tui";
+import { stripTerminalSequences, visibleWidth } from "@earendil-works/pi-tui";
 import { createIndexMenu, showIndexMenu, indexActions } from "../lib/menu.ts";
 
 const snapshot = {
@@ -29,12 +29,99 @@ test("menu separates status, workspace details, and actions without overflowing"
   assert.match(output, /Overview *\n.*● ready · 11 files/);
   assert.ok(output.indexOf("Overview") < output.indexOf("Workspace"));
   assert.ok(output.indexOf("Workspace") < output.indexOf("Actions"));
-  assert.match(output, /Model: {6}local\/qwen3-embedding-0.6b/);
+  assert.match(output, /Model: {8}local\/qwen3-embedding-0.6b/);
   assert.match(output, /Branch: *feature\/login/);
   assert.match(output, /HEAD: *123456789abc/);
   assert.match(output, /Worktree:/);
   for (const width of [0, 1, 2, 12, 40, 80, 120]) {
     for (const line of menu.render(width)) assert.ok(visibleWidth(line) <= width, `overflow at width ${width}`);
+  }
+});
+
+test("menu groups screenshot fields and aligns every label with a gap before actions", () => {
+  const full = {
+    ...snapshot,
+    details: [
+      "Project: /workspace/project",
+      "Status: ready · 11 files",
+      "Model: local/qwen3-embedding-0.6b",
+      "Files: 11 · Pending: 0 · Failed: 0",
+      "Index path: /workspace/project/.zvec-grep/index.zvec",
+      "Index drift: +0 ~0 -0",
+      "Branch: main",
+      "HEAD: 123456789abc",
+      "Worktree: /workspace/project",
+      "Changes: Uncommitted / untracked",
+      "Operation: None",
+      "Index HEAD: Not attested by daemon",
+      "Activity: Indexing complete",
+      "Checked: 2026-10-25T08:50:10.633Z",
+    ].join("\n"),
+  };
+  const lines = createIndexMenu(full, options, theme, () => {}).render(100);
+  const heading = (name: string) => lines.findIndex((line) => line.trim() === name);
+  const workspace = lines.slice(heading("Workspace"), heading("Index")).join("\n");
+  const index = lines.slice(heading("Index"), heading("Git")).join("\n");
+  const git = lines.slice(heading("Git"), heading("Actions")).join("\n");
+  assert.match(workspace, /Project:/);
+  assert.match(workspace, /Worktree:/);
+  assert.match(index, /Model:/);
+  assert.match(index, /Index path:/);
+  assert.match(index, /Index drift:/);
+  assert.match(index, /Index HEAD:/);
+  assert.match(git, /Branch:/);
+  assert.match(git, /HEAD:/);
+  for (const field of full.details.split("\n").filter((line) => !/^(Status|Files): /.test(line))) {
+    const split = field.indexOf(": ");
+    const label = field.slice(0, split + 1);
+    const value = field.slice(split + 2);
+    const rendered = lines.find((line) => line.trimStart().startsWith(label))!;
+    assert.equal(rendered.indexOf(value), 15, `misaligned ${label}`);
+  }
+  assert.equal(lines[heading("Actions") - 1].trim(), "");
+});
+
+test("menu retains uncategorized details and handles absent fields", () => {
+  const full = { ...snapshot, details: "Git: Not available\nDaemon note" };
+  const output = createIndexMenu(full, options, theme, () => {})
+    .render(80)
+    .join("\n");
+  assert.match(output, /Files: Unknown/);
+  assert.match(output, /Git: {10}Not available/);
+  assert.match(output, /Daemon note/);
+  assert.doesNotMatch(output, /Workspace|Index path|Model:/);
+});
+
+test("ANSI styling preserves layout and terminal column limits", () => {
+  const styled = {
+    fg: (_color: string, text: string) => `\x1b[90m${text}\x1b[39m`,
+    bold: (text: string) => `\x1b[1m${text}\x1b[22m`,
+  } as Theme;
+  for (const width of [0, 1, 12, 16, 17, 18, 40, 80, 120]) {
+    const plain = createIndexMenu(snapshot, options, theme, () => {}).render(width);
+    const lines = createIndexMenu(snapshot, options, styled, () => {}).render(width);
+    assert.ok(lines.every((line) => visibleWidth(line) <= width));
+    if (width > 1) assert.deepEqual(lines.map(stripTerminalSequences), plain.map(stripTerminalSequences));
+  }
+});
+
+test("wrapped paths keep a hanging indent without dropping CJK characters", () => {
+  const path = `/workspace/${"项目/".repeat(12)}index.zvec`;
+  const full = { ...snapshot, details: snapshot.details.replace(/^Project: .*$/m, `Project: ${path}`) };
+  for (const width of [16, 17, 18, 40]) {
+    const lines = createIndexMenu(full, options, theme, () => {}).render(width);
+    const start = lines.findIndex((line) => line.trimStart().startsWith("Project:"));
+    const end = lines.findIndex((line, index) => index > start && line.trimStart().startsWith("Worktree:"));
+    const project = lines.slice(start, end);
+    assert.ok(project.length > 1);
+    if (width >= 18) assert.ok(project.slice(1).every((line) => line.startsWith(" ".repeat(15))));
+    assert.equal(
+      project
+        .map((line) => line.trim())
+        .join("")
+        .replace(/^Project:\s*/, ""),
+      path,
+    );
   }
 });
 

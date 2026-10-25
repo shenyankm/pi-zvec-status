@@ -262,6 +262,158 @@ test("global auto-update survives reload/workspace changes and persists external
   );
 });
 
+test(
+  "opening a panel during automatic revalidation pauses submission without disabling the preference",
+  { timeout: 5000 },
+  async (t) => {
+    const fixture = await isolateModelCache(t, [model]);
+    const settingsPath = join(fixture.home, "pi", "zvec-status.json");
+    await writeAutoUpdateSetting(settingsPath, true, AbortSignal.timeout(2000));
+    let now = Date.now();
+    t.mock.method(Date, "now", () => now);
+    const revalidating = deferred<void>();
+    const release = deferred<void>();
+    let reads = 0;
+    const { env, calls } = await mockServer(t, async (message) => {
+      if (message.params?.name === "zvec_grep_index")
+        return { result: { content: [], structuredContent: { state: "queued" } } };
+      if (++reads === 3) {
+        revalidating.resolve();
+        await release.promise;
+      }
+      return { result: { content: [], structuredContent: { ...response, root: fixture.home } } };
+    });
+    setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+    const handlers = new Map<string, (event: object, ctx: ExtensionContext) => Promise<void>>();
+    let command!: (args: string, ctx: ExtensionContext) => Promise<void>;
+    extension({
+      on: (name: string, handler: (event: object, ctx: ExtensionContext) => Promise<void>) =>
+        handlers.set(name, handler),
+      registerCommand: (_name: string, value: { handler: typeof command }) => {
+        command = value.handler;
+      },
+    } as unknown as ExtensionAPI);
+    let input!: (data: string) => void;
+    let refreshed = deferred<void>();
+    const ctx = {
+      mode: "tui",
+      cwd: fixture.home,
+      ui: {
+        theme: { fg: (_color: string, value: string) => value },
+        setStatus: (_key: string, value: string) => {
+          if (value?.includes("stale")) refreshed.resolve();
+        },
+        onTerminalInput: (handler: typeof input) => {
+          input = handler;
+          return () => {};
+        },
+        custom: async () => "Close",
+        notify: () => assert.fail("pausing must not disable auto-update or show errors"),
+      },
+    } as unknown as ExtensionContext;
+    t.after(async () => {
+      release.resolve();
+      await handlers.get("session_shutdown")!({}, ctx);
+    });
+    await handlers.get("session_start")!({}, ctx);
+    await refreshed.promise;
+    now += 5000;
+    input("\x1b[I");
+    await revalidating.promise;
+    const opening = command("", ctx);
+    release.resolve();
+    await opening;
+    const writes = () => calls.filter((call) => call.message?.params?.name === "zvec_grep_index");
+    assert.equal(writes().length, 0, "opening during revalidation must block the pending automatic submission");
+    assert.equal(await readAutoUpdateSetting(settingsPath, AbortSignal.timeout(2000)), true);
+    for (let poll = 0; poll < 2; poll++) {
+      now += 5000;
+      refreshed = deferred<void>();
+      input("\x1b[I");
+      await refreshed.promise;
+    }
+    assert.equal(writes().length, 1, "polls after closing the panel can automatically update again");
+  },
+);
+
+for (const previouslyReady of [false, true]) {
+  test(
+    `an unavailable daemon still allows disabling global auto-update (previously ready: ${previouslyReady})`,
+    { timeout: 5000 },
+    async (t) => {
+      const fixture = await isolateModelCache(t);
+      const settingsPath = join(fixture.home, "pi", "zvec-status.json");
+      await writeAutoUpdateSetting(settingsPath, true, AbortSignal.timeout(2000));
+      let unavailable = !previouslyReady;
+      const { env, calls } = await mockServer(t, () =>
+        unavailable
+          ? { result: { isError: true, content: [] } }
+          : { result: { content: [], structuredContent: { ...response, root: fixture.home, status: "ready" } } },
+      );
+      setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+      const handlers = new Map<string, (event: object, ctx: ExtensionContext) => Promise<void>>();
+      let command!: (args: string, ctx: ExtensionContext) => Promise<void>;
+      extension({
+        on: (name: string, handler: (event: object, ctx: ExtensionContext) => Promise<void>) =>
+          handlers.set(name, handler),
+        registerCommand: (_name: string, value: { handler: typeof command }) => {
+          command = value.handler;
+        },
+      } as unknown as ExtensionAPI);
+      const ready = deferred<void>();
+      const panels: string[] = [];
+      const ctx = {
+        mode: "tui",
+        cwd: fixture.home,
+        ui: {
+          theme: { fg: (_color: string, value: string) => value },
+          setStatus: (_key: string, value: string) => {
+            if (value?.includes("ready")) ready.resolve();
+          },
+          custom: async (factory: Parameters<ExtensionContext["ui"]["custom"]>[0]) => {
+            const component = await factory(
+              { requestRender() {}, terminal: { rows: 60 } } as never,
+              { fg: (_color: string, value: string) => value, bold: (value: string) => value } as never,
+              {} as never,
+              () => {},
+            );
+            panels.push(component.render(120).join("\n"));
+            if (panels.length === 1) return "Auto-update: on";
+            if (panels.length === 2) {
+              unavailable = false;
+              return "Refresh status";
+            }
+            return "Close";
+          },
+          confirm: () => assert.fail("disabling must not require confirmation"),
+          notify: () => assert.fail("an unavailable snapshot must remain usable"),
+        },
+      } as unknown as ExtensionContext;
+      t.after(() => handlers.get("session_shutdown")!({}, ctx));
+      await handlers.get("session_start")!({}, ctx);
+      if (previouslyReady) {
+        await ready.promise;
+        unavailable = true;
+      }
+      await command("", ctx);
+      assert.equal(panels.length, 3);
+      for (const panel of panels.slice(0, 2)) {
+        assert.match(panel, /unavailable/);
+        assert.match(panel, /Refresh status/);
+        assert.match(panel, /Worktree overview/);
+        assert.doesNotMatch(panel, /● ready|Create index|Update index|Switch model|Rebuild index/);
+      }
+      assert.match(panels[0], /Auto-update: on/);
+      assert.match(panels[1], /Auto-update: off/);
+      assert.match(panels[2], /● ready/);
+      assert.match(panels[2], /Auto-update: off/);
+      assert.match(panels[2], /Update index \(incremental\)/);
+      assert.equal(await readAutoUpdateSetting(settingsPath, AbortSignal.timeout(2000)), false);
+      assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
+    },
+  );
+}
+
 for (const mode of ["enable", "decline", "disable", "abort"] as const) {
   test(`panel auto-update setting: ${mode}`, async () => {
     let enabled = mode === "disable";

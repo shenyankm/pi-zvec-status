@@ -27,7 +27,7 @@ After installation and connection to the zvec-grep service:
 
 1. Start Pi from the project directory whose index you want to manage.
 2. Check the footer, for example `● zvec · ready (last check)` or `○ zvec · no index`.
-3. Enter `/zvec` to open the **Overview**, **Workspace**, and **Actions** panel.
+3. Enter `/zvec` to open the panel, grouped into **Overview**, **Workspace**, **Index**, **Git**, and **Actions**.
 4. Select refresh, create, update, or rebuild. Choose **Switch model and rebuild** to change the embedding model.
 5. Review the confirmation prompts before submitting an operation. Jobs run in the background; the footer refreshes periodically. You can also select **Refresh status** in the panel.
 
@@ -110,10 +110,10 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 ### Refresh and interaction
 
 - Queries at startup, then **30 seconds after completion while idle**, or **2 seconds while queued/indexing**. Outages back off from 30 to at most 120 seconds; manual/focus/resume refreshes do not wait for the retry timer.
-- Refreshing replaces the previous result with `checking`; failed or timed-out reads show `unavailable`. A wall-clock watchdog expires overdue snapshots after an event-loop pause. Terminal focus and `SIGCONT` trigger refresh; all listeners and timers are removed on session shutdown.
+- Refreshing replaces the previous result with `checking`; failed or timed-out reads show `unavailable`. `/zvec` still opens when the daemon is unavailable, including before the first successful query, so you can refresh, open the worktree overview, or change the global auto-update setting. Index writes remain disabled until status is verified. A wall-clock watchdog expires overdue snapshots after an event-loop pause. Terminal focus and `SIGCONT` trigger refresh; all listeners and timers are removed on session shutdown.
 - The panel and footer share the same coalesced request and update together, including while the menu is open. The `Checked` field records snapshot time. Unverified or expired frames cannot enable writes.
 - `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
-- The panel separates **Overview**, **Workspace**, and **Actions** in a height-bounded overlay. **←/→** scroll details, **↑/↓** select actions, Enter selects, and Esc closes. The action list stays visible on short terminals, including 80×24 and 40×24; long details use Pi's native `ScrollView` independently from selection.
+- The panel groups **Overview**, **Workspace**, **Index**, **Git**, and **Actions** in a height-bounded overlay. Detail labels share an aligned value column, wrapped values keep a hanging indent, and a blank row separates details from actions. **←/→** scroll details, **↑/↓** select actions, Enter selects, and Esc closes. The action list stays visible on short terminals, including 80×24 and 40×24; long details use Pi's native `ScrollView` independently from selection.
 - Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
 - Manual writes require confirmation. Queued/running jobs, active Git operations, expired or unrecognized snapshots disable manual index writes; refresh, read-only overview, the auto-update setting, and close remain available. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
 - Index jobs run in the daemon. Closing the menu or Pi does not cancel an already accepted job.
@@ -140,7 +140,7 @@ When enabled:
 - Only an existing index reported as `stale`, using a verified downloaded **local** model, is eligible. There is no automatic creation, rebuild, model switch, download consent, or remote embedding.
 - Two eligible status samples with the same model and Git context must be at least **5 seconds apart**. This reuses the existing polls, so enabling the switch or observing a new Git context usually takes **30–60 seconds** to reach submission, not five-second file watching.
 - Before submission, the plugin rechecks the local model cache and current daemon/Git status. Unknown or missing cache data, running jobs, active Git operations, and non-stale states skip automatic submission.
-- A successful submission has a **60-second cooldown**. Automatic submission pauses while the `/zvec` panel or worktree overview is open; manually requested actions still require confirmation.
+- A successful submission has a **60-second cooldown**. Automatic submission pauses while the `/zvec` panel or worktree overview is open, including when opened during the pre-submission status recheck. Pausing preserves the global preference; polling can resume automatic updates after the panel closes. It cannot cancel an already attempted submission or accepted job. Manually requested actions still require confirmation.
 - An automatic-update error, including an uncertain submission timeout, saves the global switch as off and warns you. If saving fails, that session stays stopped and the warning explains that other sessions or restarts may still use the old setting. Refresh status before enabling it again to avoid duplicate submissions. Normal cancellation before an index submission is attempted preserves the global preference; cancellation after an attempted submission remains uncertain and disables it.
 
 Updates use local CPU, memory, and disk. Pi and the daemon must share model-cache settings; a daemon-only cache override and filesystem changes after validation cannot be detected atomically. Turning the switch off or exiting Pi cancels pending client requests, but cannot cancel a job already accepted by the daemon.

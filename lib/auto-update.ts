@@ -35,8 +35,8 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
       candidate = undefined;
       nextAttemptAt = 0;
     },
-    async update(snapshot: Snapshot, parentSignal: AbortSignal) {
-      if (!enabled || parentSignal.aborted) return false;
+    async update(snapshot: Snapshot, parentSignal: AbortSignal, isPaused = () => false) {
+      if (!enabled || parentSignal.aborted || isPaused()) return false;
       if (!eligible(snapshot) || Date.now() < nextAttemptAt) {
         candidate = undefined;
         return false;
@@ -57,7 +57,8 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
         if (choices.find((choice) => choice.model === snapshot.model)?.status !== "Downloaded") return false;
         const latest = await readSnapshot(root, signal);
         signal.throwIfAborted();
-        if (!eligible(latest) || latest.model !== snapshot.model || !sameGit(snapshot.git, latest.git)) return false;
+        if (isPaused() || !eligible(latest) || latest.model !== snapshot.model || !sameGit(snapshot.git, latest.git))
+          return false;
         submitted = true;
         await indexWorkspace(root, {}, signal);
         nextAttemptAt = Date.now() + 60_000;

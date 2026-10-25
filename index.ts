@@ -63,24 +63,36 @@ export default function (pi: ExtensionAPI) {
     });
     let displayed: string | undefined;
     let latest: Snapshot | undefined;
-    let view: Snapshot | undefined;
+    let view: Snapshot = {
+      text: "zvec: checking",
+      details: [
+        `Project: ${ctx.cwd.replace(/[\x00-\x1f\x7f-\x9f]/g, "")}`,
+        "Status: checking",
+        "Model: Unknown / not configured",
+        "Files: ? · Pending: ? · Failed: ?",
+        "Index path: Unknown",
+      ].join("\n"),
+      checkedAt: Date.now(),
+      indexed: false,
+      busy: false,
+      model: undefined,
+      git: undefined,
+    };
     const listeners = new Set<(snapshot: Snapshot) => void>();
     const render = (text: string) => {
       const base = latest ?? view;
-      if (base) {
-        view = {
-          ...base,
-          text,
-          details: base.details
-            .split("\n")
-            .filter((line) => !line.startsWith("Checked: "))
-            .map((line) => (line.startsWith("Status: ") ? `Status: ${text.replace(/^zvec: /, "")}` : line))
-            .concat(`Checked: ${new Date(base.checkedAt).toISOString()}`)
-            .join("\n"),
-        };
-        for (const listener of listeners) listener(view);
-      }
-      const formatted = formatStatus(text, ctx.ui.theme, text === "zvec: unavailable" ? undefined : view?.git);
+      view = {
+        ...base,
+        text,
+        details: base.details
+          .split("\n")
+          .filter((line) => !line.startsWith("Checked: "))
+          .map((line) => (line.startsWith("Status: ") ? `Status: ${text.replace(/^zvec: /, "")}` : line))
+          .concat(`Checked: ${new Date(base.checkedAt).toISOString()}`)
+          .join("\n"),
+      };
+      for (const listener of listeners) listener(view);
+      const formatted = formatStatus(text, ctx.ui.theme, text === "zvec: unavailable" ? undefined : view.git);
       if (formatted === displayed) return;
       ctx.ui.setStatus("zvec-status", formatted);
       displayed = formatted;
@@ -105,7 +117,7 @@ export default function (pi: ExtensionAPI) {
         enabled &&= !autoUpdateFailed;
         if (enabled !== autoUpdate.enabled) autoUpdate.setEnabled(enabled);
         let snapshot = await readSnapshot(ctx.cwd, signal);
-        if (panelSession !== currentSession && (await autoUpdate.update(snapshot, signal)))
+        if (await autoUpdate.update(snapshot, signal, () => panelSession === currentSession))
           snapshot = await readSnapshot(ctx.cwd, signal);
         signal.throwIfAborted();
         latest = snapshot;
@@ -137,9 +149,8 @@ export default function (pi: ExtensionAPI) {
         },
       },
       read: async () => {
-        const result = await current.refresh();
+        await current.refresh();
         currentSession.signal.throwIfAborted();
-        if (!result?.text || !view) throw new Error("Status is unavailable.");
         return view;
       },
       subscribe: (listener) => {

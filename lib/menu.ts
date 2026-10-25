@@ -60,7 +60,24 @@ export function createIndexMenu(
   });
 
   function renderLayout(width: number, inner: number) {
-    const [project, , model, files, path, ...git] = snapshot.details.split("\n");
+    const sections: Record<string, string[]> = { Workspace: [], Index: [], Git: [] };
+    const metadata: string[] = [];
+    let files = "Files: Unknown";
+    for (const line of snapshot.details.split("\n")) {
+      if (line.startsWith("Files: ")) {
+        files = line;
+        continue;
+      }
+      if (!line || line.startsWith("Status: ")) continue;
+      const rows = /^(Project|Worktree): /.test(line)
+        ? sections.Workspace
+        : /^(Model|Index (path|drift|HEAD)): /.test(line)
+          ? sections.Index
+          : /^(Branch|HEAD|Changes|Operation|Git(?: state)?): /.test(line)
+            ? sections.Git
+            : metadata;
+      rows.push(line);
+    }
     const status = snapshot.text.replace(/^zvec: /, "");
     const color = status.startsWith("ready")
       ? "success"
@@ -69,12 +86,18 @@ export function createIndexMenu(
         : snapshot.busy
           ? "accent"
           : "warning";
+    const labelWidth = 14;
     const row = (line: string, secondary = false) => {
       const split = line.indexOf(": ");
-      return (
-        theme.fg("muted", line.slice(0, split + 1).padEnd(12)) +
-        theme.fg(secondary ? "dim" : "text", line.slice(split + 2))
-      );
+      if (split < 0) return new Text(theme.fg("dim", line), 0, 0).render(inner);
+      const label = line.slice(0, split + 1);
+      const value = theme.fg(secondary ? "dim" : "text", line.slice(split + 2));
+      if (inner < labelWidth + 2) return new Text(theme.fg("muted", `${label} `) + value, 0, 0).render(inner);
+      return new Text(value, 0, 0)
+        .render(inner - labelWidth)
+        .map(
+          (part, index) => theme.fg("muted", index === 0 ? label.padEnd(labelWidth) : " ".repeat(labelWidth)) + part,
+        );
     };
     const text = [
       theme.bold(theme.fg("accent", "zvec")) + theme.fg("muted", "  Index Manager"),
@@ -83,13 +106,17 @@ export function createIndexMenu(
       theme.fg("muted", theme.bold("Overview")),
       theme.fg(color, `${status.startsWith("ready") ? "●" : "○"} ${status}`),
       theme.fg("muted", files),
-      "",
-      theme.fg("muted", theme.bold("Workspace")),
-      row(project, true),
-      row(model),
-      row(path, true),
-      ...git.map((line) => row(line, line.startsWith("Worktree: "))),
-    ].flatMap((line) => (line ? new Text(line, 0, 0).render(inner) : [""]));
+      ...Object.entries(sections).flatMap(([title, rows]) =>
+        rows.length
+          ? [
+              "",
+              theme.fg("muted", theme.bold(title)),
+              ...rows.map((line) => row(line, /^(Project|Worktree|Index path): /.test(line))),
+            ]
+          : [],
+      ),
+      ...(metadata.length ? ["", ...metadata.map((line) => row(line, true))] : []),
+    ].flatMap((line) => (Array.isArray(line) ? line : line ? new Text(line, 0, 0).render(inner) : [""]));
     const fit = (line: string) => truncateToWidth(` ${line}`, Math.max(0, width));
     return {
       width,
@@ -104,7 +131,7 @@ export function createIndexMenu(
       const inner = Math.max(1, Math.min(width - 2, 100));
       if (!layout || layout.width !== width) layout = renderLayout(width, inner);
       const height = Math.max(1, Math.floor(maxHeight()));
-      const count = Math.max(1, Math.min(options.length, height - layout.footer.length - 2));
+      const count = Math.max(1, Math.min(options.length, height - layout.footer.length - 3));
       if (visible !== count) {
         const current = list.getSelectedItem()?.value;
         visible = count;
@@ -112,7 +139,7 @@ export function createIndexMenu(
         list.setSelectedIndex(Math.max(0, options.indexOf(current ?? "")));
       }
       const items = list.render(inner).map((line) => truncateToWidth(` ${line}`, Math.max(0, width)));
-      const actions = [layout.actions, ...items, ...layout.footer];
+      const actions = ["", layout.actions, ...items, ...layout.footer];
       const tail = actions.length <= height ? actions : items.slice(0, height);
       const viewport = Math.max(0, height - tail.length);
       details.updateLayout(layout.header.length, viewport, () => {});
