@@ -1,6 +1,8 @@
 # Manual daemon and TUI verification
 
-Automated tests use an isolated model-cache directory and a local mock MCP server. They do not download models or rebuild a real index. The Pi loader smoke test uses the installed host to discover the package and load its TypeScript entry.
+Default `npm run check` tests use an isolated model-cache directory and a local mock MCP server. They do not download models or rebuild a real index. The Pi loader smoke test uses the installed host to discover the package and load its TypeScript entry.
+
+The separate, opt-in `npm run test:menus` drives actual Pi menus against the installed daemon and already-downloaded real local models. It covers create, incremental update, rebuild, model switching, global setting propagation between two independent Pi processes, and concurrent automatic updates. It creates and removes only disposable indexes. See [the recorded real-menu acceptance](real-menu-acceptance.md) for prerequisites, reproduction, results, and observed daemon lock retries.
 
 Run the following manual checks before release. Use a disposable workspace, not a real project. A confirmed operation can download model files and consume CPU, memory, and disk space. Use the same cache configuration in Pi and the daemon.
 

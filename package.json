@@ -40,6 +40,7 @@
     "format": "prettier --write index.ts lib test \"*.json\" .github",
     "format:check": "prettier --check index.ts lib test \"*.json\" .github",
     "benchmark": "node --experimental-strip-types test/benchmark.ts",
+    "test:menus": "python3 test/environments/real-menu-check.py",
     "test:environments": "node --experimental-strip-types --test test/git.test.ts test/live-status.test.ts test/protocol.test.ts && python3 test/environments/terminal-check.py",
     "coverage": "node --experimental-strip-types --test --experimental-test-coverage --test-coverage-exclude=test/** --test-coverage-lines=90 --test-coverage-branches=90 --test-coverage-functions=85 --test-skip-pattern=\"^Pi loader smoke:\" test/*.test.ts"
   },

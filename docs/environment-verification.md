@@ -63,16 +63,29 @@ The tests use a loopback-only dummy chat provider and send only slash commands; 
 
 This is not a manual visual review in every terminal emulator. Two initial themes are tested; live theme invalidation is a unit test, not a claimed manual theme-switch walkthrough. Third-party replacement footers remain responsible for drawing extension statuses.
 
+## 5. Real menu writes and independent Pi processes
+
+The opt-in `npm run test:menus` acceptance now runs installed Pi 1.4.0 against the **unmodified installed zvec-grep 0.2.2 daemon**, with real cached Model2Vec models rather than `FakeEmbeddingModel`. See [the complete run record](real-menu-acceptance.md) for reproduction and evidence.
+
+- Actual menus create a one-file 256-dimensional index, incrementally update it to two files, rebuild it, then switch from `local/potion-code-16m-v2` to `local/potion-retrieval-32m`, producing a two-file 512-dimensional index. All four jobs finish `succeeded`, with no pending, failed, or drift counters.
+- Two separate Pi OS processes share only the disposable workspace, agent directory, and isolated daemon. Menu changes propagate on refresh; the second process inherits on at startup and preserves it through real `/reload`.
+- After 80 files are added while only the isolated daemon is offline, both Pi processes submit automatic incremental requests. Both responses have the same job ID; the second has `reused: true`. The final index has 82 stored/scanned/indexed files, both footers show ready, and the shared setting remains on.
+- The daemon reports one `ZVEC_GREP.ENGINE.LOCK.BUSY` retry with a 250 ms delay; the same job succeeds on attempt 2. This is an observed bounded retry, not a claim that no contention occurred.
+- Both Pi processes exit 0, disposable indexes are removed, and model artifact size/mtime/ctime comparisons remain unchanged. No model download is approved and normal user settings/daemon state are not changed.
+
+This does not close the remaining offline-settings or cache-validation-window improvement items, nor does it validate other operating systems or remote providers.
+
 ## Full-check evidence
 
 | Check | Result |
 | --- | --- |
-| Plugin `npm run check` | 191 tests: 189 pass, two Windows-specific skips |
-| Plugin coverage | 97.09% lines, 95.15% branches, 92.79% functions; gates: 90/90/85 |
+| Plugin `npm run check` | 225 tests: 223 pass, two platform-specific skips |
+| Plugin coverage | 96.82% lines, 95.26% branches, 93.50% functions; gates: 90/90/85 |
 | Backend ordinary tests, aggregated across isolated phases | 809 tests: 808 pass, one Windows-specific skip |
 | Backend merged coverage | 90.71% lines, 85.88% branches, 95.51% functions; all four global gates exceed 80% |
 | Backend real environment fixtures | Four pass; zero skipped |
 | Plugin environment subset | 32 pass, plus both real Pi PTY runs at 24 rows |
+| Opt-in real menu / two-process acceptance | Four real menu writes, shared-setting propagation/reload, two auto requests coalesced to one successful job; both Pi exits 0 |
 | Plugin dependency audit | Zero known vulnerabilities in the full locked dependency graph |
 | Static/package checks | Typechecks, backend lint/format, plugin dry-run pack and backend installed-package test pass |
 
@@ -104,7 +117,7 @@ npm run check
 npm run test:environments
 ```
 
-The backend environment script needs the sibling plugin's MCP client dependency. The PTY script requires POSIX, Python 3, Git, installed Pi, and the built sibling backend; `ZG_TEST_BACKEND_ROOT` can select another backend checkout. `PI_TEST_EVIDENCE` selects the transcript output directory. For full backend checks, use a disposable HOME to avoid inheriting a developer's default model setting.
+The backend environment script needs the sibling plugin's MCP client dependency. The layout/disconnect PTY script requires POSIX, Python 3, Git, installed Pi, and the built sibling backend; `ZG_TEST_BACKEND_ROOT` can select another backend checkout. `PI_TEST_EVIDENCE` selects the transcript output directory. For full backend checks, use a disposable HOME to avoid inheriting a developer's default model setting.
 
 ## Explicit boundaries
 

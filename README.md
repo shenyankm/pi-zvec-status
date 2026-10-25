@@ -67,7 +67,7 @@ Replace the example path with your checkout's location. Local packages are loade
 The extension **does not start, stop, or reconfigure the service**. The status tool belongs to the `full` toolset. If the service is not running, start it yourself:
 
 ```bash
-zg --server on --mcp-toolset full
+zg server on --mcp-toolset full
 ```
 
 If an existing service only exposes the `agent` toolset, stop it at an appropriate time and restart it with `full`. Restarting affects other clients sharing that daemon; the extension never does this for you.
@@ -214,6 +214,14 @@ npm pack --dry-run
 ```
 
 For the reproducible menu-rendering benchmark, before/after measurements, and acceptance results, see [performance verification](docs/performance.md).
+
+Real menu writes and two-process automatic-update acceptance are an explicit opt-in test:
+
+```bash
+ZG_ACCEPTANCE_MODEL_CACHE=/absolute/path/to/downloaded/models npm run test:menus
+```
+
+This requires POSIX, Python 3, installed Pi and zvec-grep, and already-downloaded `local/potion-code-16m-v2` and `local/potion-retrieval-32m`. It creates disposable native indexes using real local inference; it does not use a fake embedding model or approve downloads. Your normal daemon, project indexes, and global Pi setting are not changed. See [real menu acceptance](docs/real-menu-acceptance.md) for results, evidence, and limitations.
 
 Source and tests use strict TypeScript with unused-local, unused-parameter, and switch-fallthrough checks. Pi loads `index.ts` directly, so no build is required. Tests use Node's built-in TypeScript stripping and test runner. `npm run check` runs compiler-based lint, Prettier verification, and the tests; `npm run format` applies code/config formatting. Git normalizes source files to LF on every OS. The pinned model snapshot table and npm-generated lockfile retain their producer's formatting.
 
