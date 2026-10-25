@@ -39,12 +39,21 @@ export async function runGit(cwd: string, args: string[], signal: AbortSignal) {
 }
 
 export async function readGit(cwd: string, signal: AbortSignal): Promise<GitContext | undefined> {
-  const [rootOutput, statusOutput, gitDirOutput] = await Promise.all([
-    runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
+  const [pathsOutput, statusOutput] = await Promise.all([
+    runGit(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"], signal),
     runGit(cwd, ["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=normal"], signal),
-    runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
   ]);
-  if (!rootOutput || statusOutput === undefined || !gitDirOutput) return;
+  if (!pathsOutput || statusOutput === undefined) return;
+  const paths = pathsOutput.replace(/\r?\n$/, "").split(/\r?\n/);
+  // rev-parse has no NUL-delimited path output; preserve paths containing newlines.
+  const [rootOutput, gitDirOutput] =
+    paths.length === 2
+      ? paths
+      : await Promise.all([
+          runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
+          runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
+        ]);
+  if (!rootOutput || !gitDirOutput) return;
   const fields = statusOutput.split("\0");
   const head = fields.find((field) => field.startsWith("# branch.oid "))?.slice(13);
   const branch = fields.find((field) => field.startsWith("# branch.head "))?.slice(14);

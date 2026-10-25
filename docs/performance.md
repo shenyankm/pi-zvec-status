@@ -89,3 +89,36 @@ These are import/cache/menu microbenchmarks, not end-to-end Pi startup, daemon i
 - No new dependencies, reduced validation, longer polling intervals, persistent MCP connections, or cached readiness claims.
 
 The audit does not prove atomicity between daemon status checks and other clients' submissions; the daemon still arbitrates competing jobs. Broken network-mount kernel I/O, power loss, and real Windows/Linux host behavior were not reproduced on this Darwin machine. No real index update or model download was requested.
+
+## Worktree snapshot and Git polling follow-up
+
+Returning from worktree details now reuses the current page's read-only snapshot instead of querying every visible row again. Opening details still reads fresh status. Explicit refresh, page changes, and reopening re-list worktrees and query the visible page. Only the currently open page is retained; index actions never use this page snapshot.
+
+`readGit()` combines its two `rev-parse` path queries into one process. A normal complete status snapshot therefore starts four Git processes instead of six, while retaining the before/after status checks, operation markers, cancellation, environment isolation, and output limits. Paths containing newlines fall back to the separate path queries because `rev-parse` does not provide NUL-delimited path output.
+
+### Measurements
+
+Environment: Darwin arm64, Node v22.23.2, locked dependencies. The same expanded `test/benchmark.ts` ran against the production code before and after this follow-up. Polling measurements use a disposable unborn Git repository and an in-process loopback mock MCP server, not a native daemon. Each timing is the median of five samples of 20 reads, after one discarded warmup sample.
+
+| Scenario | Before | After | Observation |
+| --- | ---: | ---: | --- |
+| Git context read | 11.15 ms | 10.70 ms | 4.0% less time in this run |
+| MCP status read, no Git checks | 6.78 ms | 6.79 ms | Essentially unchanged |
+| Complete status snapshot | 29.72 ms | 28.61 ms | 3.7% less time in this run |
+| Git processes per normal snapshot | 6 | 4 | 33.3% fewer processes |
+| Status calls: 20-row page → details → Back → Close | 41 | 21 | 48.8% fewer calls; Back itself submits none |
+
+The request/process reductions are deterministic regression assertions. Millisecond differences are informational local observations, not CI gates or guaranteed real-daemon speedups. The benchmark asserts exactly one read-only tool call per status/snapshot read; it does not create indexes, load models, or download artifacts. Existing menu/import/cache benchmarks remain included.
+
+### Acceptance
+
+- New process-count and Back-navigation regressions fail against the previous implementation and pass after the changes.
+- The 20-row navigation test also opens details twice, observes fresh `stale` status there while the page retains its old snapshot, adds a worktree before explicit refresh, and checks both page directions. The total is asserted at each interaction; no index writes occur.
+- A page-deadline regression verifies four timed-out rows remain `unavailable`, the unstarted fifth row remains `not checked`, and none becomes ready from a late response.
+- Existing tests still cover branch switches during queries/confirmations, Git conflicts, linked worktrees, detached/unborn HEAD, subdirectories, submodules, and sparse checkouts. The moved-worktree test now also checks Git context before moving a path containing a newline on POSIX.
+- `npm run check`: 228 tests, 226 passed, two skipped, no failures. The three new regressions also pass in three consecutive focused runs.
+- `npm pack --dry-run` and `git diff --check` pass.
+- `npm run coverage`: 97.66% lines, 95.50% branches, 93.50% functions. Worktree branches increased from 66.67% to 83.33%; coverage gates are unchanged.
+- No dependencies, connection pools, polling changes, or weakened model/download/index-operation validation were added.
+
+This follow-up did not rerun native-daemon/real-Pi PTY acceptance or cross-platform CI. Network filesystems, model inference throughput, and indexing throughput are outside these measurements.

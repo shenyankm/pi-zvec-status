@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { execFile, type ChildProcess } from "node:child_process";
+import { subscribe, unsubscribe } from "node:diagnostics_channel";
 import { mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { promisify } from "node:util";
@@ -110,6 +111,26 @@ test("repository environment overrides cannot point the display at another workt
 test("aborted Git reads reject rather than returning a non-Git result", async (t) => {
   const { root } = await repository(t);
   await assert.rejects(readGit(root, AbortSignal.abort()), { name: "AbortError" });
+});
+
+test("a snapshot uses four Git processes and one read-only MCP call", async (t) => {
+  const { root, signal } = await repository(t);
+  const { env, calls } = await mockServer(t, {
+    result: { content: [], structuredContent: { root, indexed: true, status: "ready" } },
+  });
+  const children: ChildProcess[] = [];
+  const onSpawn = (message: unknown) => children.push((message as { process: ChildProcess }).process);
+  subscribe("child_process", onSpawn);
+  try {
+    assert.equal((await readSnapshot(root, signal(), env)).text, "zvec: ready");
+  } finally {
+    unsubscribe("child_process", onSpawn);
+  }
+  assert.equal(children.length, 4);
+  assert.equal(children.filter((child) => child.spawnargs.includes("rev-parse")).length, 2);
+  assert.equal(children.filter((child) => child.spawnargs.includes("status")).length, 2);
+  assert.equal(calls.filter((call) => call.message?.method === "tools/call").length, 1);
+  assert.ok(calls.some((call) => call.message?.params?.name === "zvec_grep_index_status"));
 });
 
 test("a branch switch during a daemon query cannot label its response ready", async (t) => {
@@ -279,6 +300,9 @@ test("worktree move, missing paths, prune, recreation and bare repositories rema
   const moved = join(home, "moved 工作树");
   await git(root, "worktree", "add", "-b", "linked", original);
   assert.ok((await readWorktrees(root, signal())).some((tree) => tree.root.endsWith(name)));
+  const originalContext = await readGit(original, signal());
+  assert.equal(await realpath(originalContext!.root), await realpath(original));
+  assert.equal(originalContext?.branch, "linked");
   await git(root, "worktree", "move", original, moved);
   assert.ok((await readWorktrees(root, signal())).some((tree) => tree.root.endsWith("moved 工作树")));
   await rm(moved, { recursive: true, force: true });
@@ -323,3 +347,87 @@ test("worktree overview pages real worktrees and bounds status concurrency to fo
   assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index_status").length, 23);
   assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
 });
+
+test("worktree page deadlines leave timed-out rows unavailable and unstarted rows not checked", async (t) => {
+  const { home, root, git } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  for (let index = 0; index < 4; index++) await git(root, "worktree", "add", "--detach", join(home, `tree-${index}`));
+  const { env } = await mockServer(t, async (message) => {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    return {
+      result: {
+        content: [],
+        structuredContent: { root: message.params?.arguments?.root, indexed: true, status: "ready" },
+      },
+    };
+  });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  const signal = AbortSignal.timeout(5000);
+  const timeout = AbortSignal.timeout;
+  t.mock.method(AbortSignal, "timeout", (ms: number) => timeout(ms === 10_000 ? 50 : ms));
+  let labels: string[] = [];
+  await showWorktreeOverview(
+    {
+      cwd: root,
+      ui: {
+        select: async (_title: string, options: string[]) => {
+          labels = options;
+          return "Close";
+        },
+        notify: () => assert.fail("page timeout must not close the overview"),
+      },
+    } as unknown as ExtensionContext,
+    signal,
+  );
+  assert.equal(labels.filter((label) => label.includes("[unavailable]")).length, 4);
+  assert.equal(labels.filter((label) => label.includes("[not checked]")).length, 1);
+  assert.ok(labels.every((label) => !label.includes("[ready]")));
+});
+
+test(
+  "worktree Back reuses the page; details, refresh and page changes read fresh status",
+  { timeout: 30000 },
+  async (t) => {
+    const { home, root, git } = await repository(t);
+    await git(root, "commit", "--allow-empty", "-m", "initial");
+    for (let index = 0; index < 19; index++)
+      await git(root, "worktree", "add", "--detach", join(home, `tree-${index}`));
+    let status = "ready";
+    const { env, calls } = await mockServer(t, (message) => ({
+      result: { content: [], structuredContent: { root: message.params?.arguments?.root, indexed: true, status } },
+    }));
+    setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+    let step = 0;
+    const expectedCalls = [20, 21, 21, 22, 22, 42, 43, 63];
+    const ctx = {
+      cwd: root,
+      ui: {
+        select: async (title: string, labels: string[]) => {
+          const current = step++;
+          assert.equal(calls.filter((call) => call.message?.method === "tools/call").length, expectedCalls[current]);
+          if (current === 1 || current === 3) {
+            assert.match(title, current === 1 ? /Status: ready/ : /Status: stale/);
+            status = "stale";
+            return "Back";
+          }
+          assert.match(title, /read-only snapshot/);
+          if (current < 4) {
+            assert.match(labels[0], /\[ready\]/);
+            return labels[0];
+          }
+          if (current === 4) {
+            await git(root, "worktree", "add", "--detach", join(home, "new-tree"));
+            return "Refresh overview";
+          }
+          assert.match(title, /\/ 21 /);
+          assert.match(labels[0], /\[stale\]/);
+          return current === 5 ? "Next page" : current === 6 ? "Previous page" : "Close";
+        },
+        notify: () => assert.fail("overview must succeed"),
+      },
+    } as unknown as ExtensionContext;
+    await showWorktreeOverview(ctx, AbortSignal.timeout(15000));
+    assert.equal(step, expectedCalls.length);
+    assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
+  },
+);

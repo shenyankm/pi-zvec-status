@@ -37,35 +37,37 @@ export async function showWorktreeOverview(ctx: ExtensionContext, signal: AbortS
         }),
       );
       signal.throwIfAborted();
-      const selected = await ctx.ui.select(
-        `Worktrees ${page * 20 + 1}–${page * 20 + visible.length} / ${worktrees.length} (read-only snapshot)`,
-        [
-          ...labels,
-          ...(page > 0 ? ["Previous page"] : []),
-          ...((page + 1) * 20 < worktrees.length ? ["Next page"] : []),
-          "Refresh overview",
-          "Close",
-        ],
-        { signal },
-      );
-      if (!selected || selected === "Close") return;
-      if (selected === "Next page") {
-        page++;
-        continue;
+      while (!signal.aborted) {
+        const selected = await ctx.ui.select(
+          `Worktrees ${page * 20 + 1}–${page * 20 + visible.length} / ${worktrees.length} (read-only snapshot)`,
+          [
+            ...labels,
+            ...(page > 0 ? ["Previous page"] : []),
+            ...((page + 1) * 20 < worktrees.length ? ["Next page"] : []),
+            "Refresh overview",
+            "Close",
+          ],
+          { signal },
+        );
+        if (!selected || selected === "Close") return;
+        if (selected === "Next page") {
+          page++;
+          break;
+        }
+        if (selected === "Previous page") {
+          page--;
+          break;
+        }
+        const index = labels.indexOf(selected);
+        if (index < 0) break;
+        const tree = visible[index];
+        if (tree.bare || tree.prunable) {
+          ctx.ui.notify(selected, "info");
+          continue;
+        }
+        const snapshot = await readSnapshot(tree.root, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
+        await ctx.ui.select(`Read-only worktree\n${snapshot.details}`, ["Back"], { signal });
       }
-      if (selected === "Previous page") {
-        page--;
-        continue;
-      }
-      const index = labels.indexOf(selected);
-      if (index < 0) continue;
-      const tree = visible[index];
-      if (tree.bare || tree.prunable) {
-        ctx.ui.notify(selected, "info");
-        continue;
-      }
-      const snapshot = await readSnapshot(tree.root, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
-      await ctx.ui.select(`Read-only worktree\n${snapshot.details}`, ["Back"], { signal });
     }
   } catch {
     if (!signal.aborted)
