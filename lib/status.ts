@@ -2,6 +2,7 @@ import { realpath } from "node:fs/promises";
 import { readMetadata } from "./metadata.ts";
 import { isAbsolute, relative, resolve } from "node:path";
 import { readGit, sameGit } from "./git.ts";
+import type { AutoUpdateSetting } from "./auto-update.ts";
 
 async function canonicalRoot(root: string) {
   try {
@@ -176,6 +177,7 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
 
 export type Snapshot = Awaited<ReturnType<typeof readSnapshot>>;
 export interface StatusSource {
+  autoUpdate?: AutoUpdateSetting;
   read: () => Promise<Snapshot>;
   subscribe: (listener: (snapshot: Snapshot) => void) => () => void;
 }

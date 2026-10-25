@@ -4,21 +4,24 @@ import type { Snapshot as FullSnapshot, StatusSource } from "./status.ts";
 
 type Snapshot = Pick<FullSnapshot, "text" | "details" | "busy"> & Partial<Pick<FullSnapshot, "indexed" | "git">>;
 
-export function indexActions(snapshot: Snapshot) {
-  return snapshot.busy ||
+export function indexActions(snapshot: Snapshot, autoUpdate?: boolean) {
+  const actions =
+    snapshot.busy ||
     snapshot.git?.operation ||
     ["zvec: unknown", "zvec: checking", "zvec: status expired", "zvec: unavailable"].includes(snapshot.text)
-    ? ["Refresh status", "Worktree overview", "Close"]
-    : snapshot.indexed
-      ? [
-          "Refresh status",
-          "Worktree overview",
-          "Update index (incremental)",
-          "Switch model and rebuild",
-          "Rebuild index",
-          "Close",
-        ]
-      : ["Refresh status", "Worktree overview", "Create index", "Close"];
+      ? ["Refresh status", "Worktree overview", "Close"]
+      : snapshot.indexed
+        ? [
+            "Refresh status",
+            "Worktree overview",
+            "Update index (incremental)",
+            "Switch model and rebuild",
+            "Rebuild index",
+            "Close",
+          ]
+        : ["Refresh status", "Worktree overview", "Create index", "Close"];
+  if (autoUpdate !== undefined) actions.splice(-1, 0, `Auto-update: ${autoUpdate ? "on" : "off"}`);
+  return actions;
 }
 
 export function createIndexMenu(
@@ -156,7 +159,7 @@ export async function showIndexMenu(
       (tui, theme, _keys, done) => {
         const menu = createIndexMenu(snapshot, options, theme, done, () => Math.max(1, (tui.terminal?.rows ?? 24) - 8));
         unsubscribe = source?.subscribe((next) => {
-          menu.update(next, indexActions(next));
+          menu.update(next, indexActions(next, source?.autoUpdate?.enabled));
           tui.requestRender();
         });
         onAbort = () => done(undefined);

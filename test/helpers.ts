@@ -67,6 +67,7 @@ export async function isolateModelCache(t: TestContext, cached: string[] = [], u
   setEnv(t, {
     HOME: fixture.home,
     USERPROFILE: fixture.home,
+    PI_CODING_AGENT_DIR: join(fixture.home, "pi"),
     ZVEC_GREP_HOME: undefined,
     ZVEC_GREP_MODEL_CACHE: undefined,
   });

@@ -11,9 +11,29 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
     while (!signal.aborted) {
       let snapshot = await read();
       const { showIndexMenu, indexActions } = await import("./menu.ts");
-      const action = await showIndexMenu(ctx, snapshot, indexActions(snapshot), signal, source);
+      const action = await showIndexMenu(
+        ctx,
+        snapshot,
+        indexActions(snapshot, source?.autoUpdate?.enabled),
+        signal,
+        source,
+      );
       if (!action || action === "Close" || signal.aborted) return;
       if (action === "Refresh status") continue;
+      if (action.startsWith("Auto-update: ") && source?.autoUpdate) {
+        const setting = source.autoUpdate;
+        if (setting.enabled) await setting.setEnabled(false);
+        else if (
+          await ctx.ui.confirm(
+            "Enable automatic index updates?",
+            "Enable automatic updates globally for all Pi workspaces, including future sessions and restarts. Each session only updates its own existing stale index using downloaded local models. This uses CPU, memory and disk. No automatic creation, rebuild, model download or remote embedding. Errors disable auto-update globally to avoid duplicate submissions.",
+            { signal },
+          )
+        ) {
+          if (!signal.aborted) await setting.setEnabled(true);
+        }
+        continue;
+      }
       if (action === "Worktree overview") {
         await showWorktreeOverview(ctx, signal);
         continue;

@@ -4,7 +4,7 @@
 
 `pi-zvec-status` is a Pi extension that shows index readiness in the footer and provides an index status and management menu through `/zvec`.
 
-This is an independent third-party extension, not an official zvec-grep component. It uses existing MCP interfaces, does not parse CLI display output, and does not register additional model-facing tools. Background polling only reads status; index management operations require explicit confirmation in `/zvec`.
+This is an independent third-party extension, not an official zvec-grep component. It uses existing MCP interfaces, does not parse CLI display output, and does not register additional model-facing tools. Background polling is read-only by default. Index management requires explicit confirmation in `/zvec`, with an opt-in global switch for automatic local incremental updates.
 
 ## What does it do?
 
@@ -17,7 +17,7 @@ When using zvec-grep for semantic code search, you may want to know whether a pr
 | Worktree overview | `/zvec worktrees` lists worktrees read-only, 20 per page, with at most four concurrent status queries and a 10-second page budget. |
 | Index management | Create an index, update it incrementally, rebuild it, or switch to another local embedding model and rebuild. |
 | Model cache detection | Distinguishes `Downloaded`, `Not downloaded`, and `Cache unknown`, with downloaded models listed first. |
-| Operation confirmation | Index writes require confirmation. Missing or unverifiable local models also require separate download consent. |
+| Operation confirmation | Manual index writes require confirmation. Automatic local updates require explicit global opt-in. Missing or unverifiable local models require separate download consent for manual operations. |
 
 **This is not the search engine itself.** The zvec-grep daemon performs project scanning, model downloads, embedding computation, and index jobs. Search remains available through zvec-grep tools or its CLI. The extension does not automatically start the service, create an index, change the global default model, or offer index deletion.
 
@@ -72,7 +72,7 @@ zg --server on --mcp-toolset full
 
 If an existing service only exposes the `agent` toolset, stop it at an appropriate time and restart it with `full`. Restarting affects other clients sharing that daemon; the extension never does this for you.
 
-The `full` toolset exposes index management tools as well as status queries. The extension only calls the status tool in the background and calls the index management tool after user confirmation. Other connected clients may also access those tools. The extension does not depend on or modify Pi's own MCP configuration.
+The `full` toolset exposes index management tools as well as status queries. By default, the extension only calls the status tool in the background. Index management requires user confirmation, either for each manual operation or to enable automatic local incremental updates globally. Other connected clients may also access those tools. The extension does not depend on or modify Pi's own MCP configuration.
 
 ## Status and behavior
 
@@ -115,7 +115,7 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 - `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
 - The panel separates **Overview**, **Workspace**, and **Actions** in a height-bounded overlay. **←/→** scroll details, **↑/↓** select actions, Enter selects, and Esc closes. The action list stays visible on short terminals, including 80×24 and 40×24; long details use Pi's native `ScrollView` independently from selection.
 - Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
-- Every write operation requires confirmation. Queued/running jobs, active Git operations, expired or unrecognized snapshots limit the menu to refresh, read-only overview, and close. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
+- Manual writes require confirmation. Queued/running jobs, active Git operations, expired or unrecognized snapshots disable manual index writes; refresh, read-only overview, the auto-update setting, and close remain available. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
 - Index jobs run in the daemon. Closing the menu or Pi does not cancel an already accepted job.
 - Updates the footer only when its final displayed content changes.
 - Each request has a **10-second deadline**. Concurrent monitor refreshes share the same request.
@@ -124,6 +124,26 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 - Uses `ctx.ui.setStatus()` without replacing Pi's default footer. Third-party custom footers must display extension status themselves.
 
 The query root is exactly Pi's `ctx.cwd`. The extension verifies that the response belongs to that root, resolving existing symlinks/junctions and normalizing paths using the host OS. A different or invalid response root is rejected before showing status or allowing actions. The extension does not search parent directories for a Git repository or index. Starting Pi from a subdirectory queries that subdirectory's status.
+
+### Automatic incremental updates
+
+Open `/zvec`, select **Auto-update: off**, and confirm to enable it. Select **Auto-update: on** to disable it immediately. It is **off by default** and saved globally in **`~/.pi/agent/zvec-status.json`**, or `zvec-status.json` under `PI_CODING_AGENT_DIR` when overridden. It survives session switches, reloads, and restarts. Each session only updates its own current working directory; enabling this does not scan every project on disk. Other running sessions pick up changes on their next status refresh.
+
+```json
+{ "autoUpdate": true }
+```
+
+The plugin uses a private, atomically replaced settings file rather than modifying Pi `settings.json` or the zvec-grep global configuration. A missing file means off; unreadable or malformed settings disable automatic updates without being overwritten.
+
+When enabled:
+
+- Only an existing index reported as `stale`, using a verified downloaded **local** model, is eligible. There is no automatic creation, rebuild, model switch, download consent, or remote embedding.
+- Two eligible status samples with the same model and Git context must be at least **5 seconds apart**. This reuses the existing polls, so enabling the switch or observing a new Git context usually takes **30–60 seconds** to reach submission, not five-second file watching.
+- Before submission, the plugin rechecks the local model cache and current daemon/Git status. Unknown or missing cache data, running jobs, active Git operations, and non-stale states skip automatic submission.
+- A successful submission has a **60-second cooldown**. Automatic submission pauses while the `/zvec` panel or worktree overview is open; manually requested actions still require confirmation.
+- An automatic-update error, including an uncertain submission timeout, saves the global switch as off and warns you. If saving fails, that session stays stopped and the warning explains that other sessions or restarts may still use the old setting. Refresh status before enabling it again to avoid duplicate submissions.
+
+Updates use local CPU, memory, and disk. Pi and the daemon must share model-cache settings; a daemon-only cache override and filesystem changes after validation cannot be detected atomically. Turning the switch off or exiting Pi cancels pending client requests, but cannot cancel a job already accepted by the daemon.
 
 ### Git branches and worktrees
 
@@ -139,7 +159,7 @@ A `*` after the branch marks tracked or untracked changes. Merge, rebase, cherry
 
 Each linked worktree is queried using its own Pi working directory, not the shared Git common directory or the branch name. Two worktrees at the same commit remain distinct. Starting from a subdirectory still queries that subdirectory; the panel's `Project` path is the query directory, while `Worktree` is its Git top-level directory. The extension never silently changes the query root to the Git root.
 
-Git context is read before and after each shared status query using bounded, read-only Git commands, including porcelain-v2 status with untracked-file detection. These commands never run in the rendering path or take optional Git write locks; very large/slow status output safely degrades to `Git: Not available`. A branch/HEAD change during a query suppresses readiness (`unknown`) and asks for a refresh. Changes during an operation confirmation invalidate that confirmation. A later refresh displays the new context; no branch switch triggers an automatic index update or rebuild.
+Git context is read before and after each shared status query using bounded, read-only Git commands, including porcelain-v2 status with untracked-file detection. These commands never run in the rendering path or take optional Git write locks; very large/slow status output safely degrades to `Git: Not available`. A branch/HEAD change during a query suppresses readiness (`unknown`) and asks for a refresh. Changes during an operation confirmation invalidate that confirmation. A later refresh displays the new context. A branch switch alone never triggers a rebuild; if global auto-update is enabled, a stable new context with an eligible stale index can receive a debounced incremental update.
 
 `/zvec worktrees` never changes Pi's working directory or submits index jobs. Missing/prunable and bare worktrees are distinguished; rows not reached before the page deadline remain `not checked`, while timed-out reads show `unavailable`, never ready. New, moved, or removed worktrees are re-listed on refresh.
 
@@ -163,11 +183,11 @@ Each poll creates a short-lived MCP session, then terminates and closes it. Conn
 
 ## Safety boundaries and limitations
 
-Background polling only calls `zvec_grep_index_status({ root })`. After confirmation, the menu submits create, incremental update, or rebuild jobs through `zvec_grep_index({ root, wait: false, ... })`. It does not offer index deletion, switching to other projects, changing global model settings, or granting remote embedding authorization.
+Background polling calls `zvec_grep_index_status({ root })`. With auto-update disabled (the default), it never submits index jobs. After confirmation, the menu submits create, incremental update, or rebuild jobs through `zvec_grep_index({ root, wait: false, ... })`. Enabling the global auto-update switch additionally authorizes eligible local incremental jobs with `{ root, wait: false }`, without per-job prompts. It does not offer index deletion, switching to other projects, changing global model settings, or granting remote embedding authorization.
 
 Switching the index means switching the current project's embedding model and rebuilding, not changing Pi's working directory. Model selection lists local models supported by zvec-grep 0.2.2. Downloaded models appear first. Unreadable configuration or cache data is labeled `Cache unknown`, not incorrectly treated as missing.
 
-All writes that may use a local model share the same download-consent check: creation, model switching, incremental updates, and rebuilding with the existing model. A `Not downloaded` or `Cache unknown` model requires a separate **Download model?** confirmation before confirming the index operation. Cancelling either step prevents submission. Downloaded models skip download consent but still require operation confirmation. If the cache disappears during confirmation, the pre-submission check blocks that operation; select the action again to review download consent.
+All manual writes that may use a local model share the same download-consent check: creation, model switching, incremental updates, and rebuilding with the existing model. A `Not downloaded` or `Cache unknown` model requires a separate **Download model?** confirmation before confirming the index operation. Cancelling either step prevents submission. Downloaded models skip download consent but manual operations still require confirmation. Automatic updates skip models whose cache cannot be verified and never show a download prompt. If the cache disappears during confirmation, the pre-submission check blocks that operation; select the action again to review download consent.
 
 Opening the model list checks local completion markers, expected file sizes, and each file's recorded `mtimeMs`/`ctimeMs`. Missing or stale per-file metadata is `Cache unknown`, so same-size mutations cannot skip download consent. It does not load models, connect to a model provider, download files, or rehash large model weights. Both Hugging Face and ModelScope caches are supported.
 
