@@ -18,7 +18,9 @@ export async function runCliIndex(pi: Pick<ExtensionAPI, "exec">, ctx: Extension
       choices.map((choice) => choice.label),
       { signal },
     );
-    const choice = choices.find((choice) => choice.label === selected);
+    const picked = choices.find((choice) => choice.label === selected);
+    if (!picked || signal.aborted) return;
+    const choice = (await localModelChoices(process.env, undefined, deadline(), picked.model))[0];
     if (!choice || signal.aborted) return;
     if (!(await confirmModelDownload(ctx.ui, choice, signal))) return;
     if (

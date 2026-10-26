@@ -41,9 +41,8 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
       if (source) snapshot = await read();
       if (!indexActions(snapshot).includes(action)) continue;
       let embedding: string | undefined;
-      let choices: Awaited<ReturnType<typeof localModelChoices>> | undefined;
       if (action === "Create index" || action === "Switch model and rebuild" || (action === "Rebuild index" && snapshot.text === "zvec: rebuild required" && !snapshot.model)) {
-        choices = await localModelChoices(process.env, undefined, deadline());
+        const choices = await localModelChoices(process.env, undefined, deadline());
         if (signal.aborted) return;
         const selected = await ctx.ui.select(
           "Local embedding models (uncached models download on use)",
@@ -62,7 +61,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
       }
       let downloadAllowed = false;
       if (model.startsWith("local/")) {
-        choices ??= await localModelChoices(process.env, undefined, deadline(), model);
+        const choices = await localModelChoices(process.env, undefined, deadline(), model);
         const choice = choices.find((choice) => choice.model === model) ?? { model, status: "Cache unknown" as const };
         if (!(await confirmModelDownload(ctx.ui, choice, signal))) continue;
         downloadAllowed = choice.status !== "Downloaded";

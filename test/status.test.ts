@@ -11,7 +11,7 @@ import extension from "../index.ts";
 import { describeStatus, readStatus, readSnapshot, serverUrl } from "../lib/status.ts";
 import { openPanel } from "../lib/panel.ts";
 import { indexActions } from "../lib/menu.ts";
-import { isolateModelCache, mockServer, setEnv } from "./helpers.ts";
+import { cachedSnapshot, isolateModelCache, mockServer, setEnv } from "./helpers.ts";
 
 const base = { root: "/workspace", indexed: true, index_policy: "enabled", status: "ready" };
 
@@ -397,6 +397,30 @@ interface PanelCase {
   missingModel?: boolean;
   invalidStatus?: boolean;
   expected?: Record<string, unknown>;
+}
+
+for (const action of ["Create index", "Switch model and rebuild"]) {
+  test(`panel rechecks cache after the picker for ${action}`, async (t) => {
+    const { home, cache } = await isolateModelCache(t);
+    const { env, calls } = await mockServer(t, (message) => ({
+      result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
+        ? { state: "queued" } : { root: home, indexed: action !== "Create index", status: "ready" } },
+    }));
+    setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+    await openPanel({
+      cwd: home,
+      ui: {
+        custom: async () => action,
+        select: async (_title: string, labels: string[]) => {
+          await cachedSnapshot(cache, "local/potion-code-16m-v2");
+          return labels.find((label) => label.endsWith("local/potion-code-16m-v2"));
+        },
+        confirm: async (title: string) => { assert.equal(title, action); return true; },
+        notify: (message: string) => assert.match(message, /submitted/),
+      },
+    } as unknown as ExtensionContext, AbortSignal.timeout(3000));
+    assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
+  });
 }
 
 for (const action of ["Rebuild index", "Switch model and rebuild"]) {
