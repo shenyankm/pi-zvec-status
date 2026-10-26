@@ -100,6 +100,19 @@ test("linked worktrees have independent branches and identities; detached HEAD i
   assert.ok(formatStatus("zvec: ready", plain, detached).includes(`detached@${detached!.head!.slice(0, 7)}`));
 });
 
+test("a branch named (detached) is distinct from detached HEAD at the same commit", async (t) => {
+  const { root, git, signal } = await repository(t);
+  await git(root, "commit", "--allow-empty", "-m", "initial");
+  await git(root, "checkout", "-b", "(detached)");
+  const attached = await readGit(root, signal());
+  assert.equal(attached?.branch, "(detached)");
+  await git(root, "checkout", "--detach", "HEAD");
+  const detached = await readGit(root, signal());
+  assert.equal(detached?.branch, undefined);
+  assert.equal(attached?.head, detached?.head);
+  assert.equal(sameGit(attached, detached), false);
+});
+
 test("non-Git directories and missing Git do not break status rendering", async (t) => {
   const { home } = await cacheFixture(t);
   assert.equal(await readGit(home, AbortSignal.timeout(3000)), undefined);

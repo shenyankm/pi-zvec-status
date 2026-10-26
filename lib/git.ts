@@ -61,8 +61,11 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
   if (!rootOutput || !gitDirOutput) return;
   const fields = statusOutput.split("\0");
   const head = fields.find((field) => field.startsWith("# branch.oid "))?.slice(13);
-  const branch = fields.find((field) => field.startsWith("# branch.head "))?.slice(14);
+  let branch = fields.find((field) => field.startsWith("# branch.head "))?.slice(14);
   if (!head || !branch) return;
+  if (branch === "(detached)") {
+    branch = (await runGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal))?.replace(/\n$/, "");
+  }
   const markers = [
     ["rebase-merge", "rebase"],
     ["rebase-apply", "rebase"],
@@ -84,7 +87,7 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
   signal.throwIfAborted();
   return {
     root: rootOutput.replace(/\r?\n$/, ""),
-    branch: branch === "(detached)" ? undefined : branch,
+    branch,
     head: head === "(initial)" ? undefined : head,
     dirty: fields.some((field) => /^(1 |2 |u |\? )/.test(field)),
     operation: operations.find(Boolean),
