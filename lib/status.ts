@@ -231,10 +231,10 @@ export function describeStatus(data: unknown) {
     (indexStatus !== undefined && typeof indexStatus.status !== "string") ||
     (compatibility !== undefined &&
       (typeof compatibility.status !== "string" ||
-        !["compatible", "rebuild_required"].includes(compatibility.status))) ||
+        !["compatible", "rebuild_required", "unbuilt"].includes(compatibility.status))) ||
     (data.status !== undefined && typeof data.status !== "string") ||
     (data.index_policy !== undefined &&
-      (typeof data.index_policy !== "string" || !["enabled", "disabled", "undecided"].includes(data.index_policy))) ||
+      (typeof data.index_policy !== "string" || !["enabled", "disabled", "undecided", "uninitialized"].includes(data.index_policy))) ||
     [
       files?.stored,
       files?.pending,
@@ -270,6 +270,7 @@ export function describeStatus(data: unknown) {
     return "zvec: failed";
   }
   if (job === "cancelled") return "zvec: cancelled";
+  if (!data.indexed && (state === "missing" || state === "uninitialized")) return "zvec: no index";
   if (state !== undefined && state !== "ready" && state !== "stale") return "zvec: unknown";
   if (!data.indexed) return "zvec: no index";
   if (
