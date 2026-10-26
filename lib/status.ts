@@ -1,6 +1,6 @@
 import { realpath } from "node:fs/promises";
 import { readMetadata } from "./metadata.ts";
-import { isAbsolute, relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve, sep } from "node:path";
 import { readGit, sameGit } from "./git.ts";
 import type { AutoUpdateSetting } from "./auto-update.ts";
 
@@ -97,7 +97,9 @@ async function requestTool(
       }
       const [requested, returned] = await Promise.all([canonicalRoot(args.root), canonicalRoot(data.root)]);
       signal.throwIfAborted();
-      if (relative(requested, returned) !== "") throw new Error("Index status belongs to a different workspace.");
+      const inside = relative(returned, requested);
+      if (inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside))
+        throw new Error("Index status belongs to a different workspace.");
     }
   } catch (error) {
     if (object(error) && error.code === -32601) {

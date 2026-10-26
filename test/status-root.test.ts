@@ -8,7 +8,7 @@ import { readSnapshot, readStatus } from "../lib/status.ts";
 import { cacheFixture, mockServer, setEnv } from "./helpers.ts";
 
 for (const read of [readStatus, readSnapshot]) {
-  for (const root of ["/different-project", "relative/project", "", undefined, 42, "/workspace\0"]) {
+  for (const root of ["/different-project", "/workspace/sibling", "/workspace/src/deep/child", "relative/project", "", undefined, 42, "/workspace\0"]) {
     test(`${read.name} rejects response root ${JSON.stringify(root)}`, async (t) => {
       const { env, calls } = await mockServer(t, {
         result: {
@@ -20,13 +20,21 @@ for (const read of [readStatus, readSnapshot]) {
           },
         },
       });
-      await assert.rejects(read("/workspace", AbortSignal.timeout(3000), env), /root|different workspace|null bytes/);
+      await assert.rejects(read("/workspace/src/deep", AbortSignal.timeout(3000), env), /root|different workspace|null bytes/);
       assert.ok(
         calls.some((call) => call.method === "DELETE"),
         "rejected responses still clean up the MCP session",
       );
     });
   }
+
+  test(`${read.name} accepts the nearest ancestor workspace`, async (t) => {
+    const { env } = await mockServer(t, {
+      result: { content: [], structuredContent: { root: "/workspace", indexed: true, status: "ready" } },
+    });
+    const result = await read("/workspace/src/deep", AbortSignal.timeout(3000), env);
+    assert.equal(typeof result === "string" ? result : result.text, "zvec: ready");
+  });
 
   test(`${read.name} accepts normalized roots even when no directory exists`, async (t) => {
     const { home } = await cacheFixture(t);
