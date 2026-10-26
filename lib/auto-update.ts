@@ -33,7 +33,6 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
       controller = new AbortController();
       enabled = value;
       candidate = undefined;
-      nextAttemptAt = 0;
     },
     async update(snapshot: Snapshot, parentSignal: AbortSignal, isPaused = () => false) {
       if (!enabled || parentSignal.aborted || isPaused()) return false;

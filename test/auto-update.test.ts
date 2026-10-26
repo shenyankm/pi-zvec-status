@@ -103,6 +103,34 @@ for (const scenario of [
   });
 }
 
+test("toggling auto-update preserves a successful submission cooldown", async (t) => {
+  const { home } = await isolateModelCache(t, [model]);
+  const { env, calls } = await mockServer(t, (message) => ({
+    result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
+      ? { state: "queued" } : { ...response, root: home } },
+  }));
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const updater = createAutoUpdater(home, () => assert.fail("no error expected"));
+  const signal = AbortSignal.timeout(3000);
+  updater.setEnabled(true);
+  await updater.update(snapshot, signal);
+  now += 5000;
+  assert.equal(await updater.update(snapshot, signal), true);
+  updater.setEnabled(false);
+  updater.setEnabled(true);
+  for (let i = 0; i < 11; i++) {
+    now += 5000;
+    assert.equal(await updater.update(snapshot, signal), false);
+  }
+  assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
+  now += 5000;
+  assert.equal(await updater.update(snapshot, signal), false);
+  now += 5000;
+  assert.equal(await updater.update(snapshot, signal), true);
+});
+
 test("shutdown during submission token preflight preserves auto-update", async (t) => {
   const { home } = await isolateModelCache(t, [model]);
   const token = join(home, "token");
@@ -308,6 +336,7 @@ test("global auto-update survives reload/workspace changes and persists external
   assert.equal(writes().length, 2, "other sessions observe changes to the shared setting on refresh");
   assert.deepEqual(notifications, []);
   await writeAutoUpdateSetting(settingsPath, true, AbortSignal.timeout(2000));
+  now += 60_000;
   refreshed = deferred<void>();
   input("\x1b[I");
   await refreshed.promise;
