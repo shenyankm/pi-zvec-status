@@ -399,6 +399,34 @@ interface PanelCase {
   expected?: Record<string, unknown>;
 }
 
+for (const action of ["Rebuild index", "Switch model and rebuild"]) {
+  test(`Rust rebuild-required without a known model can recover via ${action}`, async (t) => {
+    const { home } = await isolateModelCache(t, ["local/potion-code-16m-v2"]);
+    const { env, calls } = await mockServer(t, (message) => ({
+      result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
+        ? { state: "queued" }
+        : { root: home, indexed: false, status: "rebuild_required", compatibility: { status: "rebuild_required" } } },
+    }));
+    setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+    const snapshot = await readSnapshot(home, AbortSignal.timeout(3000), env);
+    assert.ok(indexActions(snapshot).includes(action));
+    assert.ok(!indexActions(snapshot).includes("Create index"));
+    assert.ok(!indexActions(snapshot).includes("Update index (incremental)"));
+    await openPanel({
+      cwd: home,
+      ui: {
+        custom: async () => action,
+        select: async (_title: string, labels: string[]) => labels.find((label) => label.endsWith("local/potion-code-16m-v2")),
+        confirm: async (title: string) => { assert.equal(title, action); return true; },
+        notify: (message: string) => assert.match(message, /submitted/),
+      },
+    } as unknown as ExtensionContext, AbortSignal.timeout(3000));
+    const writes = calls.filter((call) => call.message?.params?.name === "zvec_grep_index");
+    assert.equal(writes.length, 1);
+    assert.deepEqual(writes[0].message?.params?.arguments, { root: home, rebuild: true, embedding: "local/potion-code-16m-v2", wait: false });
+  });
+}
+
 for (const scenario of [
   { name: "view only", choices: ["Close"] },
   { name: "escape", choices: [] },

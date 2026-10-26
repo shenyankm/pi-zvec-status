@@ -42,7 +42,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
       if (!indexActions(snapshot).includes(action)) continue;
       let embedding: string | undefined;
       let choices: Awaited<ReturnType<typeof localModelChoices>> | undefined;
-      if (action === "Create index" || action === "Switch model and rebuild") {
+      if (action === "Create index" || action === "Switch model and rebuild" || (action === "Rebuild index" && snapshot.text === "zvec: rebuild required" && !snapshot.model)) {
         choices = await localModelChoices(process.env, undefined, deadline());
         if (signal.aborted) return;
         const selected = await ctx.ui.select(

@@ -10,7 +10,9 @@ export function indexActions(snapshot: Snapshot, autoUpdate?: boolean) {
     snapshot.git?.operation ||
     ["zvec: unknown", "zvec: checking", "zvec: status expired", "zvec: unavailable"].includes(snapshot.text)
       ? ["Refresh status", "Worktree overview", "Close"]
-      : snapshot.indexed
+      : snapshot.text === "zvec: rebuild required"
+        ? ["Refresh status", "Worktree overview", "Switch model and rebuild", "Rebuild index", "Close"]
+        : snapshot.indexed
         ? [
             "Refresh status",
             "Worktree overview",
