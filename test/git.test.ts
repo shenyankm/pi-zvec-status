@@ -100,6 +100,18 @@ test("linked worktrees have independent branches and identities; detached HEAD i
   assert.ok(formatStatus("zvec: ready", plain, detached).includes(`detached@${detached!.head!.slice(0, 7)}`));
 });
 
+for (const suffix of ["\r", "\n\r", "\n"]) {
+  test(`Git roots preserve trailing control characters ${JSON.stringify(suffix)}`, { skip: process.platform === "win32" }, async (t) => {
+    const { home, root, git, signal } = await repository(t);
+    const checkout = join(home, "checkout" + suffix);
+    await git(root, "init", "--initial-branch=main", checkout);
+    const context = await readGit(checkout, signal());
+    assert.equal(context?.root, await realpath(checkout));
+    await writeFile(join(checkout, ".git", "MERGE_HEAD"), "test");
+    assert.equal((await readGit(checkout, signal()))?.operation, "merge");
+  });
+}
+
 test("a branch named (detached) is distinct from detached HEAD at the same commit", async (t) => {
   const { root, git, signal } = await repository(t);
   await git(root, "commit", "--allow-empty", "-m", "initial");

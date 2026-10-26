@@ -49,15 +49,15 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
     ),
   ]);
   if (!pathsOutput || statusOutput === undefined) return;
-  const paths = pathsOutput.replace(/\r?\n$/, "").split(/\r?\n/);
+  const paths = pathsOutput.replace(/\n$/, "").split("\n");
   // rev-parse has no NUL-delimited path output; preserve paths containing newlines.
   const [rootOutput, gitDirOutput] =
     paths.length === 2
       ? paths
-      : await Promise.all([
+      : (await Promise.all([
           runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
           runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
-        ]);
+        ])).map((output) => output?.replace(/\n$/, ""));
   if (!rootOutput || !gitDirOutput) return;
   const fields = statusOutput.split("\0");
   const head = fields.find((field) => field.startsWith("# branch.oid "))?.slice(13);
@@ -77,7 +77,7 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
   const operations = await Promise.all(
     markers.map(async ([path, operation]) => {
       try {
-        await stat(join(gitDirOutput.replace(/\r?\n$/, ""), path));
+        await stat(join(gitDirOutput, path));
         return operation;
       } catch (error) {
         return error && typeof error === "object" && "code" in error && error.code === "ENOENT" ? undefined : "unknown";
@@ -86,7 +86,7 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
   );
   signal.throwIfAborted();
   return {
-    root: rootOutput.replace(/\r?\n$/, ""),
+    root: rootOutput,
     branch,
     head: head === "(initial)" ? undefined : head,
     dirty: fields.some((field) => /^(1 |2 |u |\? )/.test(field)),
