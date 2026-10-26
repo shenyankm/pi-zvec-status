@@ -112,17 +112,27 @@ export interface Worktree {
 }
 
 export async function readWorktrees(cwd: string, signal: AbortSignal): Promise<Worktree[]> {
-  const output = await runGit(cwd, ["worktree", "list", "--porcelain", "-z"], signal);
+  const [output, rootOutput, gitDirOutput, commonOutput] = await Promise.all([
+    runGit(cwd, ["worktree", "list", "--porcelain", "-z"], signal),
+    runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
+    runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
+    runGit(cwd, ["rev-parse", "--path-format=absolute", "--git-common-dir"], signal),
+  ]);
+  const root = rootOutput?.replace(/\n$/, "");
+  const gitDir = gitDirOutput?.replace(/\n$/, "");
+  const common = commonOutput?.replace(/\n$/, "");
   if (output === undefined) throw new Error("Cannot list Git worktrees.");
   return output
     .split("\0\0")
     .filter(Boolean)
+    .filter((record) => !root || gitDir === common || !record.split("\0").includes(`worktree ${common}`))
     .map((record) => {
       const fields = record.split("\0");
       const root = fields.find((field) => field.startsWith("worktree "))?.slice(9);
       if (!root) throw new Error("Invalid Git worktree list.");
       return {
-        root,
+        // A linked worktree cannot recover a separate-git-dir main checkout; omit that unresolved entry above.
+        root: root === common && rootOutput && gitDir === common ? rootOutput.replace(/\n$/, "") : root,
         branch: fields.find((field) => field.startsWith("branch refs/heads/"))?.slice(18),
         head: fields.find((field) => field.startsWith("HEAD "))?.slice(5),
         bare: fields.includes("bare"),

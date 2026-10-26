@@ -337,6 +337,20 @@ test("worktree move, missing paths, prune, recreation and bare repositories rema
   assert.ok((await readWorktrees(bare, signal())).some((tree) => tree.bare));
 });
 
+test("separate Git directories resolve to checkouts, never Git internals", async (t) => {
+  const { home, root, git, signal } = await repository(t);
+  const checkout = join(home, "checkout");
+  const gitDir = join(home, "repo.git");
+  await git(root, "init", "--initial-branch=main", "--separate-git-dir", gitDir, checkout);
+  await git(checkout, "commit", "--allow-empty", "-m", "initial");
+  const linked = join(home, "linked");
+  await git(checkout, "worktree", "add", "-b", "linked", linked);
+  const mainTrees = await readWorktrees(checkout, signal());
+  assert.deepEqual(mainTrees.map((tree) => tree.root).sort(), [await realpath(checkout), await realpath(linked)].sort());
+  const linkedTrees = await readWorktrees(linked, signal());
+  assert.deepEqual(linkedTrees.map((tree) => tree.root), [await realpath(linked)]);
+});
+
 test("worktree overview pages real worktrees and bounds status concurrency to four", { timeout: 30000 }, async (t) => {
   const { home, root, git } = await repository(t);
   await git(root, "commit", "--allow-empty", "-m", "initial");
