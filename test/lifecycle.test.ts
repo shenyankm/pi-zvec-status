@@ -6,10 +6,11 @@ import { deferred, isolateModelCache, mockServer, setEnv } from "./helpers.ts";
 
 type Handler = (event: Record<string, never>, ctx: ExtensionContext) => Promise<void>;
 
-function harness() {
+function harness(exec?: ExtensionAPI["exec"]) {
   const handlers = new Map<string, Handler>();
   const commands = new Map<string, { handler: (args: string, ctx: ExtensionContext) => Promise<void> }>();
   extension({
+    exec,
     on: (name: string, handler: Handler) => {
       handlers.set(name, handler);
       return () => {};
@@ -21,7 +22,7 @@ function harness() {
   return {
     start: (ctx: ExtensionContext) => handlers.get("session_start")!({}, ctx),
     stop: (ctx: ExtensionContext) => handlers.get("session_shutdown")!({}, ctx),
-    open: (ctx: ExtensionContext) => commands.get("zvec")!.handler("", ctx),
+    open: (ctx: ExtensionContext, args = "") => commands.get("zvec")!.handler(args, ctx),
   };
 }
 
@@ -103,6 +104,40 @@ for (const mode of ["session switch", "reload"] as const) {
     },
   );
 }
+
+test("/zvec index works without MCP status and prevents duplicate CLI runs", { timeout: 5000 }, async (t) => {
+  const { home } = await isolateModelCache(t);
+  const { env } = await mockServer(t, { result: { isError: true, content: [] } });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  const entered = deferred<void>();
+  const completed = deferred<{ stdout: string; stderr: string; code: number; killed: boolean }>();
+  let executions = 0;
+  const app = harness(async () => {
+    executions++;
+    entered.resolve();
+    return completed.promise;
+  });
+  const ctx = {
+    mode: "tui",
+    cwd: home,
+    ui: {
+      ...plainUI,
+      select: async (_title: string, labels: string[]) => labels[0],
+      confirm: async () => true,
+    },
+  } as unknown as ExtensionContext;
+  t.after(async () => {
+    completed.resolve({ stdout: "", stderr: "", code: 0, killed: false });
+    await app.stop(ctx);
+  });
+  await app.start(ctx);
+  const running = app.open(ctx, "index");
+  await entered.promise;
+  await app.open(ctx, "index");
+  assert.equal(executions, 1);
+  completed.resolve({ stdout: "", stderr: "", code: 0, killed: false });
+  await running;
+});
 
 test("shutdown during asynchronous session startup cannot start a late monitor", async () => {
   const app = harness();

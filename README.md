@@ -4,7 +4,7 @@
 
 `pi-zvec-status` is a Pi extension that shows index readiness in the footer and provides an index status and management menu through `/zvec`.
 
-This is an independent third-party extension, not an official zvec-grep component. It uses existing MCP interfaces, does not parse CLI display output, and does not register additional model-facing tools. Background polling is read-only by default. Index management requires explicit confirmation in `/zvec`, with an opt-in global switch for automatic local incremental updates.
+This is an independent third-party extension, not an official zvec-grep component. It uses existing MCP interfaces for status and panel actions, and can run `zg index` directly on request. It does not parse CLI display output or register additional model-facing tools. Background polling is read-only by default. Index management requires explicit confirmation in `/zvec`, with an opt-in global switch for automatic local incremental updates.
 
 ## What does it do?
 
@@ -16,10 +16,11 @@ When using zvec-grep for semantic code search, you may want to know whether a pr
 | Project status panel | Live updates from the same snapshot as the footer, with query/worktree paths, Git changes and operation, model, file counts, activity, and check time. |
 | Worktree overview | `/zvec worktrees` lists worktrees read-only, 20 per page, with at most four concurrent status queries and a 10-second page budget. |
 | Index management | Create an index, update it incrementally, rebuild it, or switch to another local embedding model and rebuild. |
+| CLI indexing | `/zvec index` runs `zg index` from Pi, even when MCP status is unavailable. |
 | Model cache detection | Distinguishes `Downloaded`, `Not downloaded`, and `Cache unknown`, with downloaded models listed first. |
 | Operation confirmation | Manual index writes require confirmation. Automatic local updates require explicit global opt-in. Missing or unverifiable local models require separate download consent for manual operations. |
 
-**This is not the search engine itself.** The zvec-grep daemon performs project scanning, model downloads, embedding computation, and index jobs. Search remains available through zvec-grep tools or its CLI. The extension does not automatically start the service, create an index, change the global default model, or offer index deletion.
+**This is not the search engine itself.** The zvec-grep daemon (or the CLI in direct mode) performs project scanning, model downloads, embedding computation, and index jobs. Search remains available through zvec-grep tools or its CLI. The extension does not automatically start the service, create an index, change the global default model, or offer index deletion.
 
 ## Everyday use
 
@@ -61,6 +62,22 @@ pi -e /absolute/path/to/pi-zvec-status/index.ts
 ```
 
 Replace the example path with your checkout's location. Local packages are loaded in place; install their dependencies yourself.
+
+### Create an index with the CLI from Pi
+
+Run `/zvec index`, choose a local embedding model, approve any model download, then confirm the operation. Requires `zg` on Pi's `PATH` with support for `index --mode auto`.
+
+The extension runs the equivalent of:
+
+```bash
+zg index /absolute/project/path --mode auto --embedding <selected-local-model>
+```
+
+Arguments are passed directly without a shell. No arbitrary CLI flags, remote models, `--allow-remote`, deletion or rebuild are exposed through this command. For an existing index, select its current model; incompatible model changes are rejected by `zg`. Use the regular `/zvec` panel for a confirmed model switch or rebuild.
+
+`auto` uses the daemon if available and otherwise indexes directly; it does not start the service. Unlike MCP requests, this command waits for CLI completion without the status query's 10-second deadline. Repeated `/zvec` commands are blocked while it runs, and this session's automatic updates are paused. Session shutdown/reload aborts the CLI, but an already accepted daemon job may continue. On failure, check status before retrying.
+
+The footer is refreshed afterwards, but still needs the HTTP MCP service to show status. A successful direct CLI run can therefore leave the footer showing `unavailable` until the service is available.
 
 ### zvec-grep service
 
@@ -110,12 +127,12 @@ The server reports running create, update, and rebuild jobs as `indexing`. Overa
 ### Refresh and interaction
 
 - Queries at startup, then **30 seconds after completion while idle**, or **2 seconds while queued/indexing**. Outages back off from 30 to at most 120 seconds; manual/focus/resume refreshes do not wait for the retry timer.
-- Refreshing replaces the previous result with `checking`; failed or timed-out reads show `unavailable`. `/zvec` still opens when the daemon is unavailable, including before the first successful query, so you can refresh, open the worktree overview, or change the global auto-update setting. Index writes remain disabled until status is verified. A wall-clock watchdog expires overdue snapshots after an event-loop pause. Terminal focus and `SIGCONT` trigger refresh; all listeners and timers are removed on session shutdown.
+- Refreshing replaces the previous result with `checking`; failed or timed-out reads show `unavailable`. `/zvec` still opens when the daemon is unavailable, including before the first successful query, so you can refresh, open the worktree overview, or change the global auto-update setting. Panel index writes remain disabled until status is verified; `/zvec index` is a separately confirmed CLI path that does not require MCP status. A wall-clock watchdog expires overdue snapshots after an event-loop pause. Terminal focus and `SIGCONT` trigger refresh; all listeners and timers are removed on session shutdown.
 - The panel and footer share the same coalesced request and update together, including while the menu is open. The `Checked` field records snapshot time. Unverified or expired frames cannot enable writes.
 - `/zvec` opens the current project's status and action menu. The former `/zvec-status` command has been merged into `/zvec` and removed.
 - The panel groups **Overview**, **Workspace**, **Index**, **Git**, and **Actions** in a height-bounded overlay. Detail labels share an aligned value column, wrapped values keep a hanging indent, and a blank row separates details from actions. **←/→** scroll details, **↑/↓** select actions, Enter selects, and Esc closes. The action list stays visible on short terminals, including 80×24 and 40×24; long details use Pi's native `ScrollView` independently from selection.
 - Supports refreshing status, creating an index, incremental updates, rebuilding, and switching local embedding models with a rebuild.
-- Manual writes require confirmation. Queued/running jobs, active Git operations, expired or unrecognized snapshots disable manual index writes; refresh, read-only overview, the auto-update setting, and close remain available. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
+- Manual writes require confirmation. In the MCP panel, queued/running jobs, active Git operations, expired or unrecognized snapshots disable manual index writes; refresh, read-only overview, the auto-update setting, and close remain available. Status is checked again before submission. An operation is not submitted if the current model cannot be determined.
 - Index jobs run in the daemon. Closing the menu or Pi does not cancel an already accepted job.
 - Updates the footer only when its final displayed content changes.
 - Each request has a **10-second deadline**. Concurrent monitor refreshes share the same request.

@@ -7,6 +7,7 @@ import { readSnapshot, type Snapshot, type StatusSource } from "./lib/status.ts"
 import { openPanel } from "./lib/panel.ts";
 import { showWorktreeOverview } from "./lib/worktrees.ts";
 import { createAutoUpdater } from "./lib/auto-update.ts";
+import { runCliIndex } from "./lib/cli-index.ts";
 
 export default function (pi: ExtensionAPI) {
   let lifecycle = 0;
@@ -185,14 +186,14 @@ export default function (pi: ExtensionAPI) {
   });
 
   pi.registerCommand("zvec", {
-    description: "Manage the current index; /zvec worktrees shows a read-only overview",
+    description: "Manage the index; /zvec index runs zg index; /zvec worktrees shows a read-only overview",
     handler: async (args, ctx) => {
       if (ctx.mode !== "tui" || !session || !monitor || !source) {
         ctx.ui.notify("zvec requires an interactive Pi session.", "info");
         return;
       }
-      if (args.trim() && args.trim() !== "worktrees") {
-        ctx.ui.notify("Use /zvec or /zvec worktrees.", "info");
+      if (args.trim() && !["worktrees", "index"].includes(args.trim())) {
+        ctx.ui.notify("Use /zvec, /zvec index or /zvec worktrees.", "info");
         return;
       }
       if (panelSession === session) return;
@@ -201,6 +202,7 @@ export default function (pi: ExtensionAPI) {
       const current = monitor;
       try {
         if (args.trim() === "worktrees") await showWorktreeOverview(ctx, currentSession.signal);
+        else if (args.trim() === "index") await runCliIndex(pi, ctx, currentSession.signal);
         else await openPanel(ctx, currentSession.signal, source);
         if (monitor === current) await current.refresh();
       } finally {
