@@ -180,6 +180,30 @@ test("a snapshot uses four Git processes and one read-only MCP call", async (t) 
   assert.ok(calls.some((call) => call.message?.params?.name === "zvec_grep_index_status"));
 });
 
+for (const failedRead of [1, 2]) {
+  test(`a failed Git read (${failedRead}) is not evidence of a branch change`, async (t) => {
+    const { root, signal } = await repository(t);
+    const { env } = await mockServer(t, {
+      result: { content: [], structuredContent: { root, indexed: true, status: "ready" } },
+    });
+    let statuses = 0;
+    const onSpawn = (message: unknown) => {
+      const child = (message as { process: ChildProcess }).process;
+      child.once("spawn", () => {
+        if (child.spawnargs.includes("status") && ++statuses === failedRead) child.kill();
+      });
+    };
+    subscribe("child_process", onSpawn);
+    try {
+      const snapshot = await readSnapshot(root, signal(), env);
+      assert.equal(snapshot.text, "zvec: ready");
+      assert.doesNotMatch(snapshot.details, /Changed during query/);
+    } finally {
+      unsubscribe("child_process", onSpawn);
+    }
+  });
+}
+
 test("a branch switch during a daemon query cannot label its response ready", async (t) => {
   const { root, git, signal } = await repository(t);
   await git(root, "commit", "--allow-empty", "-m", "initial");

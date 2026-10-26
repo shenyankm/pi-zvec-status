@@ -131,7 +131,7 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
   const before = await readGit(root, signal);
   const data = await requestTool("zvec_grep_index_status", { root }, signal, env);
   const git = await readGit(root, signal);
-  const changed = !sameGit(before, git);
+  const changed = before !== undefined && git !== undefined && !sameGit(before, git);
   const text = changed ? "zvec: unknown" : describeStatus(data);
   if (!object(data)) throw new Error("Unsupported index status response.");
   const persistent = object(data.persistent) ? data.persistent : undefined;
