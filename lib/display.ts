@@ -4,6 +4,7 @@ import { truncateToWidth } from "@earendil-works/pi-tui";
 import type { GitContext } from "./git.ts";
 
 export function formatStatus(text: string, theme: Pick<Theme, "fg">, git?: GitContext) {
+  if (git?.unavailable) git = undefined;
   const state = text.replace(/^zvec: /, "");
   let icon = "○";
   let color: ThemeColor = "muted";

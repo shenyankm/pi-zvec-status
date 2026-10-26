@@ -9,7 +9,7 @@ export async function runCliIndex(pi: Pick<ExtensionAPI, "exec">, ctx: Extension
     signal.throwIfAborted();
     const git = await readGit(ctx.cwd, deadline());
     if (git?.operation) {
-      ctx.ui.notify("Finish the active Git operation before indexing.", "warning");
+      ctx.ui.notify(git.unavailable ? "Cannot verify Git state. Retry when Git is available." : "Finish the active Git operation before indexing.", "warning");
       return;
     }
     const choices = await localModelChoices(process.env, undefined, deadline());

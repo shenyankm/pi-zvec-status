@@ -8,6 +8,7 @@ const exec = promisify(execFile);
 
 export interface GitContext {
   root: string;
+  unavailable?: boolean;
   branch?: string;
   head?: string;
   dirty?: boolean;
@@ -15,7 +16,7 @@ export interface GitContext {
   stateId?: string;
 }
 
-export async function runGit(cwd: string, args: string[], signal: AbortSignal) {
+export async function runGit(cwd: string, args: string[], signal: AbortSignal, onError?: (error: unknown) => void) {
   signal.throwIfAborted();
   try {
     const { stdout } = await exec("git", ["--no-optional-locks", "-C", cwd, ...args], {
@@ -25,6 +26,7 @@ export async function runGit(cwd: string, args: string[], signal: AbortSignal) {
       windowsHide: true,
       env: {
         ...process.env,
+        LC_ALL: "C",
         GIT_DIR: undefined,
         GIT_WORK_TREE: undefined,
         GIT_COMMON_DIR: undefined,
@@ -32,15 +34,21 @@ export async function runGit(cwd: string, args: string[], signal: AbortSignal) {
       },
     });
     return stdout;
-  } catch {
+  } catch (error) {
     signal.throwIfAborted();
+    onError?.(error);
     return undefined;
   }
 }
 
 export async function readGit(cwd: string, signal: AbortSignal): Promise<GitContext | undefined> {
+  const unavailable: GitContext = { root: cwd, unavailable: true, operation: "unknown" };
+  let notRepository = false;
   const [pathsOutput, statusOutput] = await Promise.all([
-    runGit(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"], signal),
+    runGit(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"], signal, (error) => {
+      notRepository = error !== null && typeof error === "object" && "stderr" in error &&
+        typeof error.stderr === "string" && error.stderr.includes("fatal: not a git repository");
+    }),
     // Only local state is used; avoid walking history to count upstream divergence.
     runGit(
       cwd,
@@ -48,7 +56,8 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
       signal,
     ),
   ]);
-  if (!pathsOutput || statusOutput === undefined) return;
+  if (notRepository) return;
+  if (!pathsOutput || statusOutput === undefined) return unavailable;
   const paths = pathsOutput.replace(/\n$/, "").split("\n");
   // rev-parse has no NUL-delimited path output; preserve paths containing newlines.
   const [rootOutput, gitDirOutput] =
@@ -58,11 +67,11 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
           runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
           runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
         ])).map((output) => output?.replace(/\n$/, ""));
-  if (!rootOutput || !gitDirOutput) return;
+  if (!rootOutput || !gitDirOutput) return unavailable;
   const fields = statusOutput.split("\0");
   const head = fields.find((field) => field.startsWith("# branch.oid "))?.slice(13);
   let branch = fields.find((field) => field.startsWith("# branch.head "))?.slice(14);
-  if (!head || !branch) return;
+  if (!head || !branch) return unavailable;
   if (branch === "(detached)") {
     branch = (await runGit(cwd, ["symbolic-ref", "--quiet", "--short", "HEAD"], signal))?.replace(/\n$/, "");
   }

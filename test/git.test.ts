@@ -140,7 +140,8 @@ test("non-Git directories and missing Git do not break status rendering", async 
   setEnv(t, { PATH: "" });
   const snapshot = await readSnapshot(home, AbortSignal.timeout(3000), env);
   assert.equal(snapshot.text, "zvec: no index");
-  assert.equal(snapshot.git, undefined);
+  assert.equal(snapshot.git?.unavailable, true);
+  assert.ok(!indexActions(snapshot).includes("Create index"));
   assert.match(snapshot.details, /Git: Not available/);
   assert.equal(formatStatus(snapshot.text, plain), "○ zvec · no index");
 });
@@ -198,6 +199,9 @@ for (const failedRead of [1, 2]) {
       const snapshot = await readSnapshot(root, signal(), env);
       assert.equal(snapshot.text, "zvec: ready");
       assert.doesNotMatch(snapshot.details, /Changed during query/);
+      assert.match(snapshot.details, /Git: Not available/);
+      assert.equal(snapshot.git?.operation, "unknown");
+      assert.ok(!indexActions(snapshot).includes("Update index (incremental)"));
     } finally {
       unsubscribe("child_process", onSpawn);
     }

@@ -3,7 +3,7 @@ import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import extension from "../index.ts";
 import { join } from "node:path";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import fs from "node:fs/promises";
 import { syncBuiltinESMExports } from "node:module";
 import { readAutoUpdateSetting, writeAutoUpdateSetting } from "../lib/settings.ts";
@@ -42,11 +42,11 @@ for (const scenario of [
   "timeout",
 ] as const) {
   test(`auto-update: ${scenario}`, async (t) => {
-    await isolateModelCache(t, scenario === "uncached" ? [] : [model], scenario === "cache unknown");
+    const { home } = await isolateModelCache(t, scenario === "uncached" ? [] : [model], scenario === "cache unknown");
     let now = Date.now();
     t.mock.method(Date, "now", () => now);
     const errors: string[] = [];
-    const updater = createAutoUpdater("/workspace", () => errors.push("error"));
+    const updater = createAutoUpdater(home, () => errors.push("error"));
     const controller = new AbortController();
     const { env, calls } = await mockServer(t, (message) => {
       if (message.params?.name === "zvec_grep_index") {
@@ -62,6 +62,7 @@ for (const scenario of [
           content: [],
           structuredContent: {
             ...response,
+            root: home,
             ...(scenario === "state changed" ? { status: "ready" } : {}),
             ...(scenario === "model changed" ? { persistent: {} } : {}),
           },
@@ -81,7 +82,7 @@ for (const scenario of [
     assert.equal(await updater.update(snapshot, controller.signal), scenario === "success");
     const writes = () => calls.filter((call) => call.message?.params?.name === "zvec_grep_index");
     assert.equal(writes().length, ["success", "rejected", "timeout"].includes(scenario) ? 1 : 0);
-    if (writes().length) assert.deepEqual(writes()[0].message?.params?.arguments, { root: "/workspace", wait: false });
+    if (writes().length) assert.deepEqual(writes()[0].message?.params?.arguments, { root: home, wait: false });
     if (scenario === "success") {
       assert.equal(await updater.update(snapshot, controller.signal), false);
       now += 59_999;
@@ -109,7 +110,7 @@ test("shutdown during submission token preflight preserves auto-update", async (
   const controller = new AbortController();
   const { env, calls } = await mockServer(t, () => {
     process.env.ZVEC_GREP_SERVER_TOKEN_FILE = token;
-    return { result: { content: [], structuredContent: response } };
+    return { result: { content: [], structuredContent: { ...response, root: home } } };
   });
   setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN: undefined, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
   const originalStat = fs.stat;
@@ -121,7 +122,7 @@ test("shutdown during submission token preflight preserves auto-update", async (
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   let now = Date.now();
   t.mock.method(Date, "now", () => now);
-  const updater = createAutoUpdater("/workspace", () => assert.fail("preflight cancellation must not persist a disabled preference"));
+  const updater = createAutoUpdater(home, () => assert.fail("preflight cancellation must not persist a disabled preference"));
   updater.setEnabled(true);
   await updater.update(snapshot, controller.signal);
   now += 5000;
@@ -192,7 +193,7 @@ test("global auto-update survives reload/workspace changes and persists external
   let refreshed = deferred<void>();
   const ctx = {
     mode: "tui",
-    cwd: "/workspace",
+    cwd: fixture.home,
     ui: {
       theme: { fg: (_color: string, value: string) => value },
       setStatus: (_key: string, value: string) => {
@@ -234,7 +235,9 @@ test("global auto-update survives reload/workspace changes and persists external
   assert.equal(await readAutoUpdateSetting(settingsPath, AbortSignal.timeout(2000)), true);
   await handlers.get("session_shutdown")!({}, ctx);
   extension(api);
-  const otherCtx = { ...ctx, cwd: "/another-workspace" };
+  const otherRoot = join(fixture.home, "another-workspace");
+  await mkdir(otherRoot);
+  const otherCtx = { ...ctx, cwd: otherRoot };
   await handlers.get("session_start")!({}, otherCtx);
   await command("", otherCtx);
   assert.match(renderedMenu, /Auto-update: on/);
@@ -246,7 +249,7 @@ test("global auto-update survives reload/workspace changes and persists external
   input("\x1b[I");
   await refreshed.promise;
   assert.equal(writes().length, 2, "new workspaces inherit the saved global opt-in");
-  assert.equal(writes()[1].message?.params?.arguments?.root, "/another-workspace");
+  assert.equal(writes()[1].message?.params?.arguments?.root, otherRoot);
   await writeAutoUpdateSetting(settingsPath, false, AbortSignal.timeout(2000));
   for (let poll = 0; poll < 2; poll++) {
     now += 60_000;
