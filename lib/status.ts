@@ -33,6 +33,7 @@ async function requestTool(
   args: Record<string, unknown>,
   signal: AbortSignal,
   env: NodeJS.ProcessEnv = process.env,
+  onAttempt?: () => void,
 ): Promise<unknown> {
   signal = AbortSignal.any([signal, AbortSignal.timeout(10_000)]);
   signal.throwIfAborted();
@@ -68,6 +69,8 @@ async function requestTool(
   signal.addEventListener("abort", close, { once: true });
   let data: unknown;
   try {
+    signal.throwIfAborted();
+    onAttempt?.();
     await client.connect(transport, { signal, timeout: 10_000 });
     const result = await client.callTool(
       {
@@ -189,8 +192,9 @@ export async function indexWorkspace(
   options: { rebuild?: boolean; embedding?: string },
   signal: AbortSignal,
   env: NodeJS.ProcessEnv = process.env,
+  onAttempt?: () => void,
 ) {
-  const result = await requestTool("zvec_grep_index", { root, ...options, wait: false }, signal, env);
+  const result = await requestTool("zvec_grep_index", { root, ...options, wait: false }, signal, env, onAttempt);
   if (
     !object(result) ||
     typeof result.state !== "string" ||

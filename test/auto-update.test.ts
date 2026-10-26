@@ -4,6 +4,8 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import extension from "../index.ts";
 import { join } from "node:path";
 import { readFile, writeFile } from "node:fs/promises";
+import fs from "node:fs/promises";
+import { syncBuiltinESMExports } from "node:module";
 import { readAutoUpdateSetting, writeAutoUpdateSetting } from "../lib/settings.ts";
 import { createAutoUpdater } from "../lib/auto-update.ts";
 import { openPanel } from "../lib/panel.ts";
@@ -99,6 +101,34 @@ for (const scenario of [
     }
   });
 }
+
+test("shutdown during submission token preflight preserves auto-update", async (t) => {
+  const { home } = await isolateModelCache(t, [model]);
+  const token = join(home, "token");
+  await writeFile(token, "secret");
+  const controller = new AbortController();
+  const { env, calls } = await mockServer(t, () => {
+    process.env.ZVEC_GREP_SERVER_TOKEN_FILE = token;
+    return { result: { content: [], structuredContent: response } };
+  });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN: undefined, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  const originalStat = fs.stat;
+  t.mock.method(fs, "stat", async (path: Parameters<typeof fs.stat>[0]) => {
+    if (path === token) controller.abort();
+    return originalStat(path);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const updater = createAutoUpdater("/workspace", () => assert.fail("preflight cancellation must not persist a disabled preference"));
+  updater.setEnabled(true);
+  await updater.update(snapshot, controller.signal);
+  now += 5000;
+  assert.equal(await updater.update(snapshot, controller.signal), false);
+  assert.equal(updater.enabled, true);
+  assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 0);
+});
 
 test("auto-update skips unsafe snapshots and resets debounce on Git changes", async (t) => {
   const updater = createAutoUpdater("/workspace", () => assert.fail("no I/O expected"));

@@ -59,8 +59,7 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
         signal.throwIfAborted();
         if (isPaused() || !eligible(latest) || latest.model !== snapshot.model || !sameGit(snapshot.git, latest.git))
           return false;
-        submitted = true;
-        await indexWorkspace(root, {}, signal);
+        await indexWorkspace(root, {}, signal, process.env, () => { submitted = true; });
         nextAttemptAt = Date.now() + 60_000;
         return true;
       } catch {
