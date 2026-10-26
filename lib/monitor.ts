@@ -23,7 +23,8 @@ export function createMonitor({ read, render, intervalMs = 30_000, timeoutMs = 1
     clearTimeout(timer);
     controller = new AbortController();
     startedAt = Date.now();
-    const signal = timeoutMs === null ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
+    const signal =
+      timeoutMs === null ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
     pending = (async () => {
       await Promise.resolve();
       let onAbort = () => {};

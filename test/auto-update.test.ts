@@ -106,8 +106,10 @@ for (const scenario of [
 test("toggling auto-update preserves a successful submission cooldown", async (t) => {
   const { home } = await isolateModelCache(t, [model]);
   const { env, calls } = await mockServer(t, (message) => ({
-    result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
-      ? { state: "queued" } : { ...response, root: home } },
+    result: {
+      content: [],
+      structuredContent: message.params?.name === "zvec_grep_index" ? { state: "queued" } : { ...response, root: home },
+    },
   }));
   setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
   let now = Date.now();
@@ -147,10 +149,15 @@ test("shutdown during submission token preflight preserves auto-update", async (
     return originalStat(path);
   });
   syncBuiltinESMExports();
-  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  t.after(() => {
+    t.mock.restoreAll();
+    syncBuiltinESMExports();
+  });
   let now = Date.now();
   t.mock.method(Date, "now", () => now);
-  const updater = createAutoUpdater(home, () => assert.fail("preflight cancellation must not persist a disabled preference"));
+  const updater = createAutoUpdater(home, () =>
+    assert.fail("preflight cancellation must not persist a disabled preference"),
+  );
   updater.setEnabled(true);
   await updater.update(snapshot, controller.signal);
   now += 5000;
@@ -174,6 +181,7 @@ test("auto-update skips unsafe snapshots and resets debounce on Git changes", as
     { model: "remote/test" },
     { model: undefined },
     { git: { root: "/workspace", operation: "merge" } },
+    { git: { root: "/workspace", unavailable: true, operation: "unknown" } },
   ]) {
     assert.equal(await updater.update({ ...snapshot, ...patch }, signal), false);
     now += 10_000;
@@ -192,8 +200,13 @@ test("automatic update requests each receive a fresh deadline", { timeout: 5000 
   await writeAutoUpdateSetting(settingsPath, true, AbortSignal.timeout(2000));
   const { env, calls } = await mockServer(t, async (message) => {
     await new Promise((resolve) => setTimeout(resolve, 150));
-    return { result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
-      ? { state: "queued" } : { ...response, root: home } } };
+    return {
+      result: {
+        content: [],
+        structuredContent:
+          message.params?.name === "zvec_grep_index" ? { state: "queued" } : { ...response, root: home },
+      },
+    };
   });
   setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
   const timeout = AbortSignal.timeout;
@@ -209,14 +222,18 @@ test("automatic update requests each receive a fresh deadline", { timeout: 5000 
   let refreshed = deferred<void>();
   const frames: string[] = [];
   const ctx = {
-    mode: "tui", cwd: home,
+    mode: "tui",
+    cwd: home,
     ui: {
       theme: { fg: (_color: string, value: string) => value },
       setStatus: (_key: string, value: string) => {
         frames.push(value);
         if (value?.includes("stale") || value?.includes("unavailable")) refreshed.resolve();
       },
-      onTerminalInput: (handler: typeof input) => { input = handler; return () => {}; },
+      onTerminalInput: (handler: typeof input) => {
+        input = handler;
+        return () => {};
+      },
       notify: () => assert.fail("requests below their deadline must not disable auto-update"),
     },
   } as unknown as ExtensionContext;
@@ -527,25 +544,36 @@ for (const displayed of [false, true]) {
     let enabled = displayed;
     let confirmations = 0;
     let menus = 0;
-    await openPanel({
-      cwd: "/workspace",
-      ui: {
-        custom: async () => {
-          if (menus++) return "Close";
-          enabled = !displayed;
-          return `Auto-update: ${displayed ? "on" : "off"}`;
+    await openPanel(
+      {
+        cwd: "/workspace",
+        ui: {
+          custom: async () => {
+            if (menus++) return "Close";
+            enabled = !displayed;
+            return `Auto-update: ${displayed ? "on" : "off"}`;
+          },
+          confirm: async () => {
+            confirmations++;
+            return true;
+          },
+          notify: () => assert.fail("no index operation expected"),
         },
-        confirm: async () => { confirmations++; return true; },
-        notify: () => assert.fail("no index operation expected"),
+      } as unknown as ExtensionContext,
+      AbortSignal.timeout(2000),
+      {
+        autoUpdate: {
+          get enabled() {
+            return enabled;
+          },
+          setEnabled(value) {
+            enabled = value;
+          },
+        },
+        read: async () => snapshot,
+        subscribe: () => () => {},
       },
-    } as unknown as ExtensionContext, AbortSignal.timeout(2000), {
-      autoUpdate: {
-        get enabled() { return enabled; },
-        setEnabled(value) { enabled = value; },
-      },
-      read: async () => snapshot,
-      subscribe: () => () => {},
-    });
+    );
     assert.equal(enabled, !displayed);
     assert.equal(confirmations, displayed ? 0 : 1);
   });

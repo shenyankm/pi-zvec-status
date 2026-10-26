@@ -132,7 +132,8 @@ export async function readSnapshot(root: string, signal: AbortSignal, env: NodeJ
   const data = await requestTool("zvec_grep_index_status", { root }, signal, env);
   const after = await readGit(root, signal);
   const git = before?.unavailable ? before : after;
-  const changed = before !== undefined && after !== undefined && !before.unavailable && !after.unavailable && !sameGit(before, after);
+  const changed =
+    before !== undefined && after !== undefined && !before.unavailable && !after.unavailable && !sameGit(before, after);
   const text = changed ? "zvec: unknown" : describeStatus(data);
   if (!object(data)) throw new Error("Unsupported index status response.");
   const persistent = object(data.persistent) ? data.persistent : undefined;
@@ -239,7 +240,8 @@ export function describeStatus(data: unknown) {
         !["compatible", "rebuild_required", "unbuilt"].includes(compatibility.status))) ||
     (data.status !== undefined && typeof data.status !== "string") ||
     (data.index_policy !== undefined &&
-      (typeof data.index_policy !== "string" || !["enabled", "disabled", "undecided", "uninitialized"].includes(data.index_policy))) ||
+      (typeof data.index_policy !== "string" ||
+        !["enabled", "disabled", "undecided", "uninitialized"].includes(data.index_policy))) ||
     [
       files?.stored,
       files?.pending,

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { runCliIndex } from "../lib/cli-index.ts";
-import { cachedSnapshot, isolateModelCache } from "./helpers.ts";
+import { cachedSnapshot, isolateModelCache, setEnv } from "./helpers.ts";
 
 for (const scenario of [
   "success",
@@ -25,7 +25,9 @@ for (const scenario of [
       ui: {
         select: async (_title: string, labels: string[]) => {
           if (scenario === "download completes in picker") await cachedSnapshot(cache, "local/potion-code-16m-v2");
-          return scenario === "selection cancelled" ? undefined : labels.find((label) => label.endsWith("local/potion-code-16m-v2"));
+          return scenario === "selection cancelled"
+            ? undefined
+            : labels.find((label) => label.endsWith("local/potion-code-16m-v2"));
         },
         confirm: async (title: string) => {
           confirmations.push(title);
@@ -55,17 +57,46 @@ for (const scenario of [
       assert.equal(calls.length, 0);
       return;
     }
-    assert.deepEqual(confirmations, scenario === "download completes in picker" ? ["Run zg index?"] : ["Download model?", "Run zg index?"]);
+    assert.deepEqual(
+      confirmations,
+      scenario === "download completes in picker" ? ["Run zg index?"] : ["Download model?", "Run zg index?"],
+    );
     assert.equal(calls.length, 1);
     assert.deepEqual(calls[0], [
       "zg",
       ["index", home, "--mode", "auto", "--embedding", "local/potion-code-16m-v2"],
       { cwd: home, signal: controller.signal },
     ]);
-    assert.match(notices.at(-1)!, ["success", "download completes in picker"].includes(scenario) ? /completed/ : /before retrying/);
+    assert.match(
+      notices.at(-1)!,
+      ["success", "download completes in picker"].includes(scenario) ? /completed/ : /before retrying/,
+    );
     assert.ok(!notices.at(-1)!.includes("\x1b"));
   });
 }
+
+test("unreadable Git blocks CLI indexing before any model selection", async (t) => {
+  const { home } = await isolateModelCache(t);
+  setEnv(t, { PATH: "" });
+  let notices = 0;
+  await runCliIndex(
+    {
+      exec: async () => assert.fail("unknown Git context must block writes"),
+    },
+    {
+      cwd: home,
+      ui: {
+        select: async () => assert.fail("unknown Git context must block selection"),
+        notify: (message: string) => {
+          notices++;
+          assert.match(message, /Cannot verify Git state/);
+        },
+      },
+    } as unknown as ExtensionContext,
+    AbortSignal.timeout(2000),
+  );
+  assert.equal(notices, 1);
+});
 
 test("CLI indexing never prompts or spawns after session shutdown", async () => {
   const controller = new AbortController();

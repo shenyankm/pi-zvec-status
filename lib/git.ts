@@ -46,8 +46,12 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
   let notRepository = false;
   const [pathsOutput, statusOutput] = await Promise.all([
     runGit(cwd, ["rev-parse", "--show-toplevel", "--absolute-git-dir"], signal, (error) => {
-      notRepository = error !== null && typeof error === "object" && "stderr" in error &&
-        typeof error.stderr === "string" && error.stderr.includes("fatal: not a git repository");
+      notRepository =
+        error !== null &&
+        typeof error === "object" &&
+        "stderr" in error &&
+        typeof error.stderr === "string" &&
+        error.stderr.includes("fatal: not a git repository");
     }),
     // Only local state is used; avoid walking history to count upstream divergence.
     runGit(
@@ -63,10 +67,12 @@ export async function readGit(cwd: string, signal: AbortSignal): Promise<GitCont
   const [rootOutput, gitDirOutput] =
     paths.length === 2
       ? paths
-      : (await Promise.all([
-          runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
-          runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
-        ])).map((output) => output?.replace(/\n$/, ""));
+      : (
+          await Promise.all([
+            runGit(cwd, ["rev-parse", "--show-toplevel"], signal),
+            runGit(cwd, ["rev-parse", "--absolute-git-dir"], signal),
+          ])
+        ).map((output) => output?.replace(/\n$/, ""));
   if (!rootOutput || !gitDirOutput) return unavailable;
   const fields = statusOutput.split("\0");
   const head = fields.find((field) => field.startsWith("# branch.oid "))?.slice(13);
@@ -143,7 +149,7 @@ export async function readWorktrees(cwd: string, signal: AbortSignal): Promise<W
       const root = fields.find((field) => field.startsWith("worktree "))?.slice(9);
       if (!root) throw new Error("Invalid Git worktree list.");
       return {
-        // A linked worktree cannot recover a separate-git-dir main checkout; omit that unresolved entry above.
+        // shortcut: Git exposes no separate-git-dir main-checkout back-pointer from linked trees; omit until Git supplies one.
         root: root === common && rootOutput && gitDir === common ? rootOutput.replace(/\n$/, "") : root,
         branch: fields.find((field) => field.startsWith("branch refs/heads/"))?.slice(18),
         head: fields.find((field) => field.startsWith("HEAD "))?.slice(5),

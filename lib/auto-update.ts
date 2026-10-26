@@ -52,13 +52,20 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
       const signal = AbortSignal.any([parentSignal, current.signal]);
       let submitted = false;
       try {
-        const choices = await localModelChoices(process.env, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]), snapshot.model);
+        const choices = await localModelChoices(
+          process.env,
+          undefined,
+          AbortSignal.any([signal, AbortSignal.timeout(10_000)]),
+          snapshot.model,
+        );
         if (choices.find((choice) => choice.model === snapshot.model)?.status !== "Downloaded") return false;
         const latest = await readSnapshot(root, signal);
         signal.throwIfAborted();
         if (isPaused() || !eligible(latest) || latest.model !== snapshot.model || !sameGit(snapshot.git, latest.git))
           return false;
-        await indexWorkspace(root, {}, signal, process.env, () => { submitted = true; });
+        await indexWorkspace(root, {}, signal, process.env, () => {
+          submitted = true;
+        });
         nextAttemptAt = Date.now() + 60_000;
         return true;
       } catch {

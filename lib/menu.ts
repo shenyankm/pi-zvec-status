@@ -13,15 +13,15 @@ export function indexActions(snapshot: Snapshot, autoUpdate?: boolean) {
       : snapshot.text === "zvec: rebuild required"
         ? ["Refresh status", "Worktree overview", "Switch model and rebuild", "Rebuild index", "Close"]
         : snapshot.indexed
-        ? [
-            "Refresh status",
-            "Worktree overview",
-            "Update index (incremental)",
-            "Switch model and rebuild",
-            "Rebuild index",
-            "Close",
-          ]
-        : ["Refresh status", "Worktree overview", "Create index", "Close"];
+          ? [
+              "Refresh status",
+              "Worktree overview",
+              "Update index (incremental)",
+              "Switch model and rebuild",
+              "Rebuild index",
+              "Close",
+            ]
+          : ["Refresh status", "Worktree overview", "Create index", "Close"];
   if (autoUpdate !== undefined) actions.splice(-1, 0, `Auto-update: ${autoUpdate ? "on" : "off"}`);
   return actions;
 }

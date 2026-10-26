@@ -34,9 +34,21 @@ for (const [name, patch, expected] of [
     "ready · 42 files",
   ],
   ["Rust ready", { status: "ready" }, "ready"],
-  ["Rust unbuilt", { indexed: false, status: "missing", index_policy: "uninitialized", compatibility: { status: "unbuilt" } }, "no index"],
-  ["Rust disabled", { indexed: false, status: "disabled", index_policy: "disabled", compatibility: { status: "unbuilt" } }, "disabled"],
-  ["Rust deleted storage", { indexed: false, status: "missing", compatibility: { status: "compatible", version: 2 } }, "no index"],
+  [
+    "Rust unbuilt",
+    { indexed: false, status: "missing", index_policy: "uninitialized", compatibility: { status: "unbuilt" } },
+    "no index",
+  ],
+  [
+    "Rust disabled",
+    { indexed: false, status: "disabled", index_policy: "disabled", compatibility: { status: "unbuilt" } },
+    "disabled",
+  ],
+  [
+    "Rust deleted storage",
+    { indexed: false, status: "missing", compatibility: { status: "compatible", version: 2 } },
+    "no index",
+  ],
   ["Rust uninitialized state", { indexed: false, status: "uninitialized" }, "no index"],
   ["missing", { indexed: false }, "no index"],
   ["disabled", { indexed: false, index_policy: "disabled" }, "disabled"],
@@ -403,22 +415,33 @@ for (const action of ["Create index", "Switch model and rebuild"]) {
   test(`panel rechecks cache after the picker for ${action}`, async (t) => {
     const { home, cache } = await isolateModelCache(t);
     const { env, calls } = await mockServer(t, (message) => ({
-      result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
-        ? { state: "queued" } : { root: home, indexed: action !== "Create index", status: "ready" } },
+      result: {
+        content: [],
+        structuredContent:
+          message.params?.name === "zvec_grep_index"
+            ? { state: "queued" }
+            : { root: home, indexed: action !== "Create index", status: "ready" },
+      },
     }));
     setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
-    await openPanel({
-      cwd: home,
-      ui: {
-        custom: async () => action,
-        select: async (_title: string, labels: string[]) => {
-          await cachedSnapshot(cache, "local/potion-code-16m-v2");
-          return labels.find((label) => label.endsWith("local/potion-code-16m-v2"));
+    await openPanel(
+      {
+        cwd: home,
+        ui: {
+          custom: async () => action,
+          select: async (_title: string, labels: string[]) => {
+            await cachedSnapshot(cache, "local/potion-code-16m-v2");
+            return labels.find((label) => label.endsWith("local/potion-code-16m-v2"));
+          },
+          confirm: async (title: string) => {
+            assert.equal(title, action);
+            return true;
+          },
+          notify: (message: string) => assert.match(message, /submitted/),
         },
-        confirm: async (title: string) => { assert.equal(title, action); return true; },
-        notify: (message: string) => assert.match(message, /submitted/),
-      },
-    } as unknown as ExtensionContext, AbortSignal.timeout(3000));
+      } as unknown as ExtensionContext,
+      AbortSignal.timeout(3000),
+    );
     assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
   });
 }
@@ -427,27 +450,43 @@ for (const action of ["Rebuild index", "Switch model and rebuild"]) {
   test(`Rust rebuild-required without a known model can recover via ${action}`, async (t) => {
     const { home } = await isolateModelCache(t, ["local/potion-code-16m-v2"]);
     const { env, calls } = await mockServer(t, (message) => ({
-      result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
-        ? { state: "queued" }
-        : { root: home, indexed: false, status: "rebuild_required", compatibility: { status: "rebuild_required" } } },
+      result: {
+        content: [],
+        structuredContent:
+          message.params?.name === "zvec_grep_index"
+            ? { state: "queued" }
+            : { root: home, indexed: false, status: "rebuild_required", compatibility: { status: "rebuild_required" } },
+      },
     }));
     setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
     const snapshot = await readSnapshot(home, AbortSignal.timeout(3000), env);
     assert.ok(indexActions(snapshot).includes(action));
     assert.ok(!indexActions(snapshot).includes("Create index"));
     assert.ok(!indexActions(snapshot).includes("Update index (incremental)"));
-    await openPanel({
-      cwd: home,
-      ui: {
-        custom: async () => action,
-        select: async (_title: string, labels: string[]) => labels.find((label) => label.endsWith("local/potion-code-16m-v2")),
-        confirm: async (title: string) => { assert.equal(title, action); return true; },
-        notify: (message: string) => assert.match(message, /submitted/),
-      },
-    } as unknown as ExtensionContext, AbortSignal.timeout(3000));
+    await openPanel(
+      {
+        cwd: home,
+        ui: {
+          custom: async () => action,
+          select: async (_title: string, labels: string[]) =>
+            labels.find((label) => label.endsWith("local/potion-code-16m-v2")),
+          confirm: async (title: string) => {
+            assert.equal(title, action);
+            return true;
+          },
+          notify: (message: string) => assert.match(message, /submitted/),
+        },
+      } as unknown as ExtensionContext,
+      AbortSignal.timeout(3000),
+    );
     const writes = calls.filter((call) => call.message?.params?.name === "zvec_grep_index");
     assert.equal(writes.length, 1);
-    assert.deepEqual(writes[0].message?.params?.arguments, { root: home, rebuild: true, embedding: "local/potion-code-16m-v2", wait: false });
+    assert.deepEqual(writes[0].message?.params?.arguments, {
+      root: home,
+      rebuild: true,
+      embedding: "local/potion-code-16m-v2",
+      wait: false,
+    });
   });
 }
 
@@ -535,6 +574,7 @@ for (const scenario of [
     );
     const snapshot = {
       ...base,
+      root: fixture.home,
       indexed: config.indexed ?? true,
       runtime: { job_state: config.invalidStatus ? "future_status" : config.busy ? "running" : "succeeded" },
       persistent: {
@@ -567,7 +607,7 @@ for (const scenario of [
     let downloadConfirmations = 0;
     const prompts: { title: string; message: string }[] = [];
     const ctx = {
-      cwd: "/workspace",
+      cwd: fixture.home,
       ui: {
         custom: async (factory: MenuFactory) => {
           menus.push(await renderMenu(factory));
@@ -612,7 +652,7 @@ for (const scenario of [
     if (config.expected) {
       assert.equal(confirmations, 1);
       assert.equal(downloadConfirmations, config.cache === "Downloaded" ? 0 : 1);
-      assert.deepEqual(writes[0].message?.params?.arguments, { root: "/workspace", ...config.expected, wait: false });
+      assert.deepEqual(writes[0].message?.params?.arguments, { root: fixture.home, ...config.expected, wait: false });
       assert.equal(notifications.length, 1);
       assert.match(
         notifications[0],
@@ -627,10 +667,8 @@ for (const scenario of [
       assert.ok(labels.every((label) => /^\[(Downloaded|Not downloaded|Cache unknown)\]/.test(label)));
     }
     for (const prompt of prompts) {
-      assert.match(
-        prompt.message,
-        prompt.title === "Download model?" ? /network bandwidth and local disk space/ : /Project: \/workspace/,
-      );
+      if (prompt.title === "Download model?") assert.match(prompt.message, /network bandwidth and local disk space/);
+      else assert.ok(prompt.message.includes(`Project: ${fixture.home}`));
     }
     if (downloadConfirmations && confirmations) assert.equal(prompts[0].title, "Download model?");
     if (config.changed) assert.match(notifications[0], /state has changed/);
@@ -638,7 +676,7 @@ for (const scenario of [
     if (config.missingModel) assert.match(notifications[0], /Cannot determine the embedding model/);
     if (config.submissionTimeout) {
       t.mock.restoreAll();
-      assert.equal(await readStatus("/workspace", new AbortController().signal, env), "zvec: indexing");
+      assert.equal(await readStatus(fixture.home, new AbortController().signal, env), "zvec: indexing");
       assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
     }
     if (!config.expected && !config.changed && !config.cacheRemoved && !config.cacheMutated && !config.missingModel) {

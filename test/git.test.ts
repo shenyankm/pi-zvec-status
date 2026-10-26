@@ -101,15 +101,19 @@ test("linked worktrees have independent branches and identities; detached HEAD i
 });
 
 for (const suffix of ["\r", "\n\r", "\n"]) {
-  test(`Git roots preserve trailing control characters ${JSON.stringify(suffix)}`, { skip: process.platform === "win32" }, async (t) => {
-    const { home, root, git, signal } = await repository(t);
-    const checkout = join(home, "checkout" + suffix);
-    await git(root, "init", "--initial-branch=main", checkout);
-    const context = await readGit(checkout, signal());
-    assert.equal(context?.root, await realpath(checkout));
-    await writeFile(join(checkout, ".git", "MERGE_HEAD"), "test");
-    assert.equal((await readGit(checkout, signal()))?.operation, "merge");
-  });
+  test(
+    `Git roots preserve trailing control characters ${JSON.stringify(suffix)}`,
+    { skip: process.platform === "win32" },
+    async (t) => {
+      const { home, root, git, signal } = await repository(t);
+      const checkout = join(home, "checkout" + suffix);
+      await git(root, "init", "--initial-branch=main", checkout);
+      const context = await readGit(checkout, signal());
+      assert.equal(context?.root, await realpath(checkout));
+      await writeFile(join(checkout, ".git", "MERGE_HEAD"), "test");
+      assert.equal((await readGit(checkout, signal()))?.operation, "merge");
+    },
+  );
 }
 
 test("a branch named (detached) is distinct from detached HEAD at the same commit", async (t) => {
@@ -181,7 +185,7 @@ test("a snapshot uses four Git processes and one read-only MCP call", async (t) 
   assert.ok(calls.some((call) => call.message?.params?.name === "zvec_grep_index_status"));
 });
 
-for (const failedRead of [1, 2]) {
+for (const failedRead of [1, 2, "all"]) {
   test(`a failed Git read (${failedRead}) is not evidence of a branch change`, async (t) => {
     const { root, signal } = await repository(t);
     const { env } = await mockServer(t, {
@@ -191,7 +195,7 @@ for (const failedRead of [1, 2]) {
     const onSpawn = (message: unknown) => {
       const child = (message as { process: ChildProcess }).process;
       child.once("spawn", () => {
-        if (child.spawnargs.includes("status") && ++statuses === failedRead) child.kill();
+        if (child.spawnargs.includes("status") && (++statuses === failedRead || failedRead === "all")) child.kill();
       });
     };
     subscribe("child_process", onSpawn);
@@ -399,9 +403,15 @@ test("separate Git directories resolve to checkouts, never Git internals", async
   const linked = join(home, "linked");
   await git(checkout, "worktree", "add", "-b", "linked", linked);
   const mainTrees = await readWorktrees(checkout, signal());
-  assert.deepEqual(mainTrees.map((tree) => tree.root).sort(), [await realpath(checkout), await realpath(linked)].sort());
+  assert.deepEqual(
+    mainTrees.map((tree) => tree.root).sort(),
+    [await realpath(checkout), await realpath(linked)].sort(),
+  );
   const linkedTrees = await readWorktrees(linked, signal());
-  assert.deepEqual(linkedTrees.map((tree) => tree.root), [await realpath(linked)]);
+  assert.deepEqual(
+    linkedTrees.map((tree) => tree.root),
+    [await realpath(linked)],
+  );
 });
 
 test("worktree overview pages real worktrees and bounds status concurrency to four", { timeout: 30000 }, async (t) => {

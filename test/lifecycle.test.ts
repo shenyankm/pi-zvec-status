@@ -39,8 +39,10 @@ for (const mode of ["session switch", "reload"] as const) {
     `${mode}: a late model selection cannot submit or unlock the new session's menu`,
     { timeout: 5000 },
     async (t) => {
-      await isolateModelCache(t);
-      const { calls, env } = await mockServer(t, { result: { content: [], structuredContent: snapshot } });
+      const { home } = await isolateModelCache(t);
+      const { calls, env } = await mockServer(t, {
+        result: { content: [], structuredContent: { ...snapshot, root: home } },
+      });
       setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
       const old = harness();
       const current = mode === "reload" ? harness() : old;
@@ -53,7 +55,7 @@ for (const mode of ["session switch", "reload"] as const) {
       let staleConfirmations = 0;
       const oldCtx = {
         mode: "tui",
-        cwd: "/workspace",
+        cwd: home,
         ui: {
           ...plainUI,
           custom: async () => "Switch model and rebuild",
@@ -70,7 +72,7 @@ for (const mode of ["session switch", "reload"] as const) {
       } as unknown as ExtensionContext;
       const currentCtx = {
         mode: "tui",
-        cwd: "/workspace",
+        cwd: home,
         ui: {
           ...plainUI,
           custom: async () => {

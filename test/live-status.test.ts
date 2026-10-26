@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import extension from "../index.ts";
-import { deferred, mockServer, setEnv } from "./helpers.ts";
+import { cacheFixture, deferred, mockServer, setEnv } from "./helpers.ts";
 
 async function until(check: () => boolean) {
   const deadline = Date.now() + 3000;
@@ -17,6 +17,7 @@ test(
   "open panel, footer, focus refresh and disconnect recovery share one live snapshot",
   { timeout: 10000 },
   async (t) => {
+    const { home } = await cacheFixture(t);
     let state = "ready";
     const { env, calls } = await mockServer(t, () => ({
       result:
@@ -25,7 +26,7 @@ test(
           : {
               content: [],
               structuredContent: {
-                root: "/workspace",
+                root: home,
                 indexed: true,
                 status: state,
                 runtime: { job_state: state === "indexing" ? "running" : "succeeded" },
@@ -50,7 +51,7 @@ test(
     const theme = { fg: (_color: string, value: string) => value, bold: (value: string) => value };
     const ctx = {
       mode: "tui",
-      cwd: "/workspace",
+      cwd: home,
       ui: {
         theme,
         onTerminalInput: (fn: typeof input) => {
