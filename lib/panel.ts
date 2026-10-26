@@ -22,7 +22,7 @@ export async function openPanel(ctx: ExtensionContext, signal: AbortSignal, sour
       if (action === "Refresh status") continue;
       if (action.startsWith("Auto-update: ") && source?.autoUpdate) {
         const setting = source.autoUpdate;
-        if (setting.enabled) await setting.setEnabled(false);
+        if (action === "Auto-update: on") await setting.setEnabled(false);
         else if (
           await ctx.ui.confirm(
             "Enable automatic index updates?",

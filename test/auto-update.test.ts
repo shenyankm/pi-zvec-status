@@ -414,6 +414,35 @@ for (const previouslyReady of [false, true]) {
   );
 }
 
+for (const displayed of [false, true]) {
+  test(`auto-update selection follows the displayed label despite a concurrent setting change (${displayed})`, async () => {
+    let enabled = displayed;
+    let confirmations = 0;
+    let menus = 0;
+    await openPanel({
+      cwd: "/workspace",
+      ui: {
+        custom: async () => {
+          if (menus++) return "Close";
+          enabled = !displayed;
+          return `Auto-update: ${displayed ? "on" : "off"}`;
+        },
+        confirm: async () => { confirmations++; return true; },
+        notify: () => assert.fail("no index operation expected"),
+      },
+    } as unknown as ExtensionContext, AbortSignal.timeout(2000), {
+      autoUpdate: {
+        get enabled() { return enabled; },
+        setEnabled(value) { enabled = value; },
+      },
+      read: async () => snapshot,
+      subscribe: () => () => {},
+    });
+    assert.equal(enabled, !displayed);
+    assert.equal(confirmations, displayed ? 0 : 1);
+  });
+}
+
 for (const mode of ["enable", "decline", "disable", "abort"] as const) {
   test(`panel auto-update setting: ${mode}`, async () => {
     let enabled = mode === "disable";
