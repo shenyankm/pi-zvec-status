@@ -2,7 +2,7 @@ interface MonitorOptions {
   read: (signal: AbortSignal) => Promise<string>;
   render: (text: string) => void;
   intervalMs?: number;
-  timeoutMs?: number;
+  timeoutMs?: number | null;
 }
 
 type RefreshResult = { text: string; error?: never } | { error: string; text?: never };
@@ -23,7 +23,7 @@ export function createMonitor({ read, render, intervalMs = 30_000, timeoutMs = 1
     clearTimeout(timer);
     controller = new AbortController();
     startedAt = Date.now();
-    const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
+    const signal = timeoutMs === null ? controller.signal : AbortSignal.any([controller.signal, AbortSignal.timeout(timeoutMs)]);
     pending = (async () => {
       await Promise.resolve();
       let onAbort = () => {};
@@ -64,7 +64,7 @@ export function createMonitor({ read, render, intervalMs = 30_000, timeoutMs = 1
   function wake() {
     if (stopped) return;
     if (pending) {
-      if (Date.now() - startedAt >= timeoutMs) {
+      if (timeoutMs !== null && Date.now() - startedAt >= timeoutMs) {
         controller?.abort(new DOMException("Status request expired", "TimeoutError"));
         void pending.then(() => refresh());
       }

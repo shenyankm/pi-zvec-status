@@ -53,7 +53,7 @@ export function createAutoUpdater(root: string, onError: () => unknown) {
       const signal = AbortSignal.any([parentSignal, current.signal]);
       let submitted = false;
       try {
-        const choices = await localModelChoices(process.env, undefined, signal, snapshot.model);
+        const choices = await localModelChoices(process.env, undefined, AbortSignal.any([signal, AbortSignal.timeout(10_000)]), snapshot.model);
         if (choices.find((choice) => choice.model === snapshot.model)?.status !== "Downloaded") return false;
         const latest = await readSnapshot(root, signal);
         signal.throwIfAborted();

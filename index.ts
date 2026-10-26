@@ -100,11 +100,13 @@ export default function (pi: ExtensionAPI) {
     };
     render("zvec: checking");
     const current = (monitor = createMonitor({
+      // Each I/O operation owns its deadline; an automatic update spans several requests.
+      timeoutMs: null,
       read: async (signal) => {
         latest = undefined;
         let enabled = false;
         try {
-          enabled = await readAutoUpdateSetting(settingsPath, signal);
+          enabled = await readAutoUpdateSetting(settingsPath, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
           settingsFailed = false;
         } catch {
           signal.throwIfAborted();

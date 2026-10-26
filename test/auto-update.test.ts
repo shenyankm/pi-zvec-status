@@ -158,6 +158,52 @@ test("auto-update skips unsafe snapshots and resets debounce on Git changes", as
   assert.equal(await updater.update(snapshot, AbortSignal.abort()), false);
 });
 
+test("automatic update requests each receive a fresh deadline", { timeout: 5000 }, async (t) => {
+  const { home } = await isolateModelCache(t, [model]);
+  const settingsPath = join(home, "pi", "zvec-status.json");
+  await writeAutoUpdateSetting(settingsPath, true, AbortSignal.timeout(2000));
+  const { env, calls } = await mockServer(t, async (message) => {
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    return { result: { content: [], structuredContent: message.params?.name === "zvec_grep_index"
+      ? { state: "queued" } : { ...response, root: home } } };
+  });
+  setEnv(t, { ...env, ZVEC_GREP_SERVER_TOKEN_FILE: undefined });
+  const timeout = AbortSignal.timeout;
+  t.mock.method(AbortSignal, "timeout", (ms: number) => timeout(ms === 10_000 ? 400 : ms));
+  let now = Date.now();
+  t.mock.method(Date, "now", () => now);
+  const handlers = new Map<string, (event: object, ctx: ExtensionContext) => Promise<void>>();
+  extension({
+    on: (name: string, handler: (event: object, ctx: ExtensionContext) => Promise<void>) => handlers.set(name, handler),
+    registerCommand: () => {},
+  } as unknown as ExtensionAPI);
+  let input!: (data: string) => void;
+  let refreshed = deferred<void>();
+  const frames: string[] = [];
+  const ctx = {
+    mode: "tui", cwd: home,
+    ui: {
+      theme: { fg: (_color: string, value: string) => value },
+      setStatus: (_key: string, value: string) => {
+        frames.push(value);
+        if (value?.includes("stale") || value?.includes("unavailable")) refreshed.resolve();
+      },
+      onTerminalInput: (handler: typeof input) => { input = handler; return () => {}; },
+      notify: () => assert.fail("requests below their deadline must not disable auto-update"),
+    },
+  } as unknown as ExtensionContext;
+  t.after(() => handlers.get("session_shutdown")!({}, ctx));
+  await handlers.get("session_start")!({}, ctx);
+  await refreshed.promise;
+  now += 5000;
+  refreshed = deferred<void>();
+  input("\x1b[I");
+  await refreshed.promise;
+  assert.equal(calls.filter((call) => call.message?.params?.name === "zvec_grep_index").length, 1);
+  assert.ok(!frames.some((frame) => frame?.includes("unavailable")));
+  assert.equal(await readAutoUpdateSetting(settingsPath, timeout(2000)), true);
+});
+
 test("global auto-update survives reload/workspace changes and persists external or error disabling", async (t) => {
   const fixture = await isolateModelCache(t, [model]);
   const settingsPath = join(fixture.home, "pi", "zvec-status.json");
