@@ -94,7 +94,13 @@ test("empty directories, incomplete files, and malformed completion markers do n
   assert.equal((await localModelChoices({}, home)).find((choice) => choice.model === potion)?.status, "Not downloaded");
   await cachedSnapshot(cache, potion);
   await writeFile(marker, "{invalid");
-  assert.equal((await localModelChoices({}, home)).find((choice) => choice.model === potion)?.status, "Not downloaded");
+  const corrupt = (await localModelChoices({}, home)).find((choice) => choice.model === potion)!;
+  assert.equal(corrupt.status, "Cache unknown");
+  await confirmModelDownload({ confirm: async (_title, message) => {
+    assert.match(message, /could not be verified/);
+    assert.doesNotMatch(message, /This model is not downloaded/);
+    return false;
+  } }, corrupt, AbortSignal.timeout(2000));
   await writeFile(marker, JSON.stringify({ version: 1, fingerprint: "wrong" }));
   assert.equal((await localModelChoices({}, home)).find((choice) => choice.model === potion)?.status, "Not downloaded");
 });

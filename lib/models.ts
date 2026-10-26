@@ -62,7 +62,7 @@ async function snapshotStatus(cache: string, snapshot: ModelSnapshot, signal: Ab
         : "Downloaded";
   } catch (error) {
     signal.throwIfAborted();
-    if (missing(error) || error instanceof SyntaxError) return "Not downloaded";
+    if (missing(error)) return "Not downloaded";
     return "Cache unknown";
   }
 }
