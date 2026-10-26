@@ -195,7 +195,10 @@ for (const failedRead of [1, 2, "all"]) {
     const onSpawn = (message: unknown) => {
       const child = (message as { process: ChildProcess }).process;
       child.once("spawn", () => {
-        if (child.spawnargs.includes("status") && (++statuses === failedRead || failedRead === "all")) child.kill();
+        if (child.spawnargs.includes("status") && (++statuses === failedRead || failedRead === "all")) {
+          child.emit("error", new Error("Simulated git status failure"));
+          child.kill();
+        }
       });
     };
     subscribe("child_process", onSpawn);
@@ -404,14 +407,11 @@ test("separate Git directories resolve to checkouts, never Git internals", async
   await git(checkout, "worktree", "add", "-b", "linked", linked);
   const mainTrees = await readWorktrees(checkout, signal());
   assert.deepEqual(
-    mainTrees.map((tree) => tree.root).sort(),
+    (await Promise.all(mainTrees.map((tree) => realpath(tree.root)))).sort(),
     [await realpath(checkout), await realpath(linked)].sort(),
   );
   const linkedTrees = await readWorktrees(linked, signal());
-  assert.deepEqual(
-    linkedTrees.map((tree) => tree.root),
-    [await realpath(linked)],
-  );
+  assert.deepEqual(await Promise.all(linkedTrees.map((tree) => realpath(tree.root))), [await realpath(linked)]);
 });
 
 test("worktree overview pages real worktrees and bounds status concurrency to four", { timeout: 30000 }, async (t) => {
