@@ -190,10 +190,12 @@ test("global cache configuration takes precedence over the environment, matching
   const cache = join(home, "configured-cache");
   await cachedSnapshot(cache, e5);
   await mkdir(join(home, ".zvec-grep"), { recursive: true });
-  await writeFile(join(home, ".zvec-grep", "config.json"), JSON.stringify({ defaults: { modelCacheDir: cache } }));
-  const choices = await localModelChoices({ ZVEC_GREP_MODEL_CACHE: join(home, "empty") }, home);
-  assert.equal(choices[0].model, e5);
-  assert.equal(choices[0].status, "Downloaded");
+  for (const modelCacheDir of [cache, ` ${cache} `, `${cache}\n`]) {
+    await writeFile(join(home, ".zvec-grep", "config.json"), JSON.stringify({ defaults: { modelCacheDir } }));
+    const choices = await localModelChoices({ ZVEC_GREP_MODEL_CACHE: join(home, "empty") }, home);
+    assert.equal(choices[0].model, e5);
+    assert.equal(choices[0].status, "Downloaded");
+  }
 });
 
 for (const status of ["Not downloaded", "Cache unknown"] as const) {
@@ -253,6 +255,7 @@ test("invalid cache configuration is unknown, not incorrectly labeled as not dow
     "null",
     "[]",
     JSON.stringify({ defaults: { modelCacheDir: 123 } }),
+    JSON.stringify({ defaults: { modelCacheDir: " \n" } }),
     ...[null, [], "invalid"].map((defaults) => JSON.stringify({ defaults })),
   ]) {
     await writeFile(config, value);

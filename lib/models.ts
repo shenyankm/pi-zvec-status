@@ -31,7 +31,7 @@ async function cacheDirectory(env: NodeJS.ProcessEnv, home: string, signal: Abor
     throw new Error("Invalid model cache directory.");
   }
   return resolve(
-    configured ?? env.ZVEC_GREP_MODEL_CACHE ?? join(env.ZVEC_GREP_HOME ?? join(home, ".zvec-grep"), "models"),
+    configured?.trim() ?? env.ZVEC_GREP_MODEL_CACHE ?? join(env.ZVEC_GREP_HOME ?? join(home, ".zvec-grep"), "models"),
   );
 }
 
